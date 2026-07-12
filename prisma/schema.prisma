@@ -1,0 +1,51 @@
+// Configuración del motor de base de datos
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 1. Entidad Comunidad
+model Comunidad {
+  id_comunidad     Int       @id @default(autoincrement())
+  codigo_unico     String    @unique
+  nombre_comunidad String
+  fecha_creacion   DateTime  @default(now())
+  usuarios         Usuario[]
+}
+
+// 2. Entidad Usuario
+model Usuario {
+  id_usuario       Int            @id @default(autoincrement())
+  nombre           String
+  telefono         String         @unique 
+  password         String         
+  rol              String         @default("Vecino") 
+  id_comunidad     Int
+  comunidad        Comunidad      @relation(fields: [id_comunidad], references: [id_comunidad])
+  alertas          Alerta[]
+  notificaciones   Notificacion[]
+}
+
+// 3. Entidad Alerta
+model Alerta {
+  id_alerta      Int            @id @default(autoincrement())
+  fecha_hora     DateTime       @default(now())
+  estado         String         @default("Activa") 
+  id_usuario     Int
+  usuario        Usuario        @relation(fields: [id_usuario], references: [id_usuario])
+  notificaciones Notificacion[]
+}
+
+// 4. Entidad Notificación
+model Notificacion {
+  id_notificacion     Int      @id @default(autoincrement())
+  estado_entrega      String   @default("Enviada") 
+  id_alerta           Int
+  alerta              Alerta   @relation(fields: [id_alerta], references: [id_alerta])
+  id_usuario_receptor Int
+  usuarioReceptor     Usuario  @relation(fields: [id_usuario_receptor], references: [id_usuario])
+}
