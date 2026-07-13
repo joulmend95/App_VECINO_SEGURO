@@ -33,23 +33,36 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.crearComunidadController = void 0;
-const comunidadService = __importStar(require("../services/comunidad.service"));
-const crearComunidadController = async (req, res) => {
+exports.registrarUsuarioController = void 0;
+const usuarioService = __importStar(require("../services/usuario.service"));
+const registrarUsuarioController = async (req, res) => {
     try {
-        const { codigo, nombre } = req.body;
-        if (!codigo || !nombre) {
-            res.status(400).json({ mensaje: 'El código y el nombre de la comunidad son obligatorios' });
+        const { nombre, telefono, password, codigoComunidad } = req.body;
+        if (!nombre || !telefono || !password || !codigoComunidad) {
+            res.status(400).json({ mensaje: 'Todos los campos son obligatorios' });
             return;
         }
-        const comunidad = await comunidadService.crearComunidad({ codigo, nombre });
+        const nuevoUsuario = await usuarioService.registrarUsuario({
+            nombre,
+            telefono,
+            password,
+            codigoComunidad
+        });
         res.status(201).json({
-            mensaje: 'Comunidad creada con éxito',
-            comunidad
+            mensaje: 'Usuario registrado con éxito',
+            usuario: {
+                id_usuario: nuevoUsuario.id_usuario,
+                nombre: nuevoUsuario.nombre,
+                telefono: nuevoUsuario.telefono
+            }
         });
     }
     catch (error) {
-        res.status(500).json({ mensaje: 'Error interno al intentar crear la comunidad', error });
+        if (error instanceof Error) {
+            res.status(400).json({ mensaje: error.message });
+            return;
+        }
+        res.status(500).json({ mensaje: 'Error interno al registrar el usuario' });
     }
 };
-exports.crearComunidadController = crearComunidadController;
+exports.registrarUsuarioController = registrarUsuarioController;

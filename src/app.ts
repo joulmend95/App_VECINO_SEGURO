@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import comunidadRoutes from './routes/comunidad.routers';
+import usuarioRoutes from './routes/usuario.routers';
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,7 +20,9 @@ app.get('/', (req, res) => {
 
 // <-- HABILITAMOS EL ENDPOINT DE COMUNIDADES
 app.use('/api/comunidades', comunidadRoutes); 
+app.use('/api/usuarios', usuarioRoutes);
+
 
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    // El servidor queda activo sin logs de arranque para mantener el flujo más limpio.
 });

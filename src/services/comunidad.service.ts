@@ -1,14 +1,18 @@
 import prisma from '../config/prisma';
+import { type Comunidad } from '@prisma/client';
 
-export const crearComunidad = async (codigo: string, nombre: string, descripcion?: string) => {
-    
-    // Usamos Prisma para insertar la comunidad en la base de datos
+export interface CrearComunidadInput {
+    codigo: string;
+    nombre: string;
+}
+
+export const crearComunidad = async ({ codigo, nombre }: CrearComunidadInput): Promise<Comunidad> => {
     const nuevaComunidad = await prisma.comunidad.create({
         data: {
             codigo_unico: codigo,
             nombre_comunidad: nombre,
-            // Nota: Si en tu schema tienes otros nombres, cámbialos aquí
         }
     });
+
     return nuevaComunidad;
 };
