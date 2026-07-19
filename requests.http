@@ -1,0 +1,19 @@
+### Registrar Usuario
+POST http://localhost:3333/api/usuarios/registro
+Content-Type: application/json
+
+{
+  "nombre": "Jorge",
+  "telefono": "1234567890",
+  "password": "123456",
+  "codigoComunidad": "URB-2026"
+}
+
+### Crear Comunidad
+POST http://localhost:3333/api/comunidades
+Content-Type: application/json
+
+{
+  "codigo": "URB-2026",
+  "nombre": "Urbanización El Bosque"
+}

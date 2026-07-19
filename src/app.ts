@@ -1,12 +1,16 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import comunidadRoutes from './routes/comunidad.routers';
-import usuarioRoutes from './routes/usuario.routers';
+
+//IMPORTACIONES
+import comunidadRoutes from './routes/comunidad.routes';
+import usuarioRoutes from './routes/usuario.routes';
+
+import alertaRoutes from './routes/alerta.routes';
 
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3333;
 
 app.use(cors());
 app.use(express.json());
@@ -18,11 +22,11 @@ app.get('/', (req, res) => {
     res.json({ mensaje: 'Servidor de Vecino Seguro funcionando correctamente.' });
 });
 
-// <-- HABILITAMOS EL ENDPOINT DE COMUNIDADES
 app.use('/api/comunidades', comunidadRoutes); 
 app.use('/api/usuarios', usuarioRoutes);
 
+app.use('/api/alertas', alertaRoutes);
 
-app.listen(PORT, () => {
-    // El servidor queda activo sin logs de arranque para mantener el flujo más limpio.
+app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });

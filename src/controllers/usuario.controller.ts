@@ -3,15 +3,16 @@ import * as usuarioService from '../services/usuario.service';
 
 export const registrarUsuarioController = async (req: Request, res: Response): Promise<void> => {
     try {
+        // 1. Extraemos exactamente las variables que TU BASE DE DATOS usa
         const { nombre, telefono, password, codigoComunidad } = req.body;
 
-        console.log("Datos recibidos en el servidor:", req.body);
-        
+        // 2. Validamos que lleguen todas
         if (!nombre || !telefono || !password || !codigoComunidad) {
             res.status(400).json({ mensaje: 'Todos los campos son obligatorios' });
             return;
         }
 
+        // 3. Enviamos UN SOLO OBJETO (entre llaves) para cumplir con el argumento único
         const nuevoUsuario = await usuarioService.registrarUsuario({
             nombre,
             telefono,
@@ -19,6 +20,7 @@ export const registrarUsuarioController = async (req: Request, res: Response): P
             codigoComunidad
         });
 
+        // 4. Respondemos mostrando el teléfono en lugar del correo
         res.status(201).json({
             mensaje: 'Usuario registrado con éxito',
             usuario: {
@@ -27,12 +29,7 @@ export const registrarUsuarioController = async (req: Request, res: Response): P
                 telefono: nuevoUsuario.telefono
             }
         });
-    } catch (error) {
-        if (error instanceof Error) {
-            res.status(400).json({ mensaje: error.message });
-            return;
-        }
-
-        res.status(500).json({ mensaje: 'Error interno al registrar el usuario' });
+    } catch (error: any) {
+        res.status(400).json({ mensaje: error.message });
     }
 };

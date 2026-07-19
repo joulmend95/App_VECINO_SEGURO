@@ -33,6 +33,7 @@ model Usuario {
 // 3. Entidad Alerta
 model Alerta {
   id_alerta      Int            @id @default(autoincrement())
+  tipo_alerta    String         
   fecha_hora     DateTime       @default(now())
   estado         String         @default("Activa") 
   id_usuario     Int
