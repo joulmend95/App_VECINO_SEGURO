@@ -9,7 +9,7 @@ const cacheAlertas = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 // 1. EMITIR ALERTA (Optimizado + Asíncrono + Invalidación)
 // ==========================================
 export const emitirAlerta = async (tipo_alerta: string, id_usuario: number, id_comunidad: number) => {
-  // ⚡ OPTIMIZACIÓN 1: Eliminamos el `prisma.usuario.findUnique` redundante.
+  //  OPTIMIZACIÓN 1: Eliminamos el `prisma.usuario.findUnique` redundante.
   // Como el middleware JWT ya validó que el id_usuario es legítimo, insertamos directamente.
   
   const nuevaAlerta = await prisma.alerta.create({
@@ -20,14 +20,14 @@ export const emitirAlerta = async (tipo_alerta: string, id_usuario: number, id_c
     }
   });
 
-  // ⚡ OPTIMIZACIÓN 2: Tarea Asíncrona (No esperamos a que termine para responder al celular)
+  //  OPTIMIZACIÓN 2: Tarea Asíncrona (No esperamos a que termine para responder al celular)
   colaTrabajo.emit('procesar-alerta-comunitaria', {
     id_alerta: nuevaAlerta.id_alerta,
     id_comunidad: id_comunidad,
     id_emisor: id_usuario
   });
 
-  // ⚡ OPTIMIZACIÓN 3: Invalidación Explícita de Caché
+  //  OPTIMIZACIÓN 3: Invalidación Explícita de Caché
   // Al crearse una nueva emergencia, borramos la memoria vieja de esa comunidad
   const cacheKey = `alertas_comunidad_${id_comunidad}`;
   cacheAlertas.del(cacheKey);
@@ -45,7 +45,7 @@ export const obtenerAlertasPorComunidad = async (id_comunidad: number) => {
   // PASO 1 (Cache-Aside): ¿Está en memoria?
   const dataEnCache = cacheAlertas.get(cacheKey);
   if (dataEnCache) {
-    console.log(`⚡ [CACHÉ HIT] Devolviendo alertas de comunidad #${id_comunidad} desde Memoria (< 3ms)`);
+    console.log(` [CACHÉ HIT] Devolviendo alertas de comunidad #${id_comunidad} desde Memoria (< 3ms)`);
     return { fuente: 'CACHE_MEMORIA', data: dataEnCache };
   }
 
@@ -63,7 +63,7 @@ export const obtenerAlertasPorComunidad = async (id_comunidad: number) => {
     orderBy: { fecha_hora: 'desc' },
     take: 20, // Paginación: solo las últimas 20 para no sobrecargar el móvil
     
-    // ⚡ EAGER LOADING con Selección de Campos (Seguridad + Rendimiento)
+    // EAGER LOADING con Selección de Campos (Seguridad + Rendimiento)
     include: {
       usuario: {
         select: {
