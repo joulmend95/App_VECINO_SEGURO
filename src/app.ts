@@ -8,12 +8,25 @@ import usuarioRoutes from './routes/usuario.routes';
 
 import alertaRoutes from './routes/alerta.routes';
 
+import './services/notificacion.worker';
+
 
 const app = express();
 const PORT = process.env.PORT || 3333;
 
 app.use(cors());
 app.use(express.json());
+
+app.use((req, res, next) => {
+    const start = Date.now();
+    console.log(`[REQUEST] ${req.method} ${req.originalUrl}`);
+
+    res.on('finish', () => {
+        console.log(`[RESPONSE] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms)`);
+    });
+
+    next();
+});
 
 // ==========================================
 // RUTAS DE LA API
