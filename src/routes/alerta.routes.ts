@@ -1,17 +1,25 @@
 import { Router } from 'express';
-// 1. Importamos el middleware 
-import { verificarAutenticacion } from '../middlewares/auth.middleware';
-// 2. Importamos ambos controladores 
-import { emitirAlertaController, listarAlertasComunidadController } from '../controllers/alerta.controller';
+import {
+    verificarAutenticacion,
+    exigirComunidadActiva,
+} from '../middlewares/auth.middleware';
+import {
+    emitirAlertaController,
+    listarAlertasComunidadController,
+} from '../controllers/alerta.controller';
 
 const router = Router();
 
+// Ambas rutas exigen sesión Y pertenencia aprobada a una comunidad.
+//
+// `exigirComunidadActiva` es la pieza nueva: sin ella, un vecino registrado
+// pero aún no aprobado por el administrador podría emitir alertas de
+// emergencia a una comunidad de la que no forma parte.
 
-// Le colocamos verificarAutenticacion ANTES del controlador para protegerla
-router.post('/emitir', verificarAutenticacion as any, emitirAlertaController as any);
+// POST /api/alertas/emitir
+router.post('/emitir', verificarAutenticacion, exigirComunidadActiva, emitirAlertaController);
 
-// Esta ruta será: GET /api/alertas/comunidad
-// La usaremos en Postman para demostrar que la caché y el fin del problema N+1 funcionan
-router.get('/comunidad', verificarAutenticacion as any, listarAlertasComunidadController as any);
+// GET /api/alertas/comunidad
+router.get('/comunidad', verificarAutenticacion, exigirComunidadActiva, listarAlertasComunidadController);
 
 export default router;

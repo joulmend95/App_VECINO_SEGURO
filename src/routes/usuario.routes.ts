@@ -1,13 +1,47 @@
 import { Router } from 'express';
-// 1. Importamos AMBOS controladores: el tuyo de registro y el nuevo para el token
-import { registrarUsuarioController, generarTokenPruebaController } from '../controllers/usuario.controller';
+import {
+    registrarUsuarioController,
+    loginController,
+    perfilController,
+    generarTokenPruebaController,
+} from '../controllers/usuario.controller';
+import { verificarAutenticacion } from '../middlewares/auth.middleware';
+import { validar } from '../middlewares/validacion.middleware';
+import { ES_PRODUCCION } from '../config/entorno';
 
 const router = Router();
 
-// Tu ruta existente: POST /api/usuarios/registro
-router.post('/registro', registrarUsuarioController);
+// POST /api/usuarios/registro — crear cuenta (sin comunidad todavía)
+router.post(
+    '/registro',
+    validar([
+        { campo: 'nombre', etiqueta: 'El nombre', min: 2, max: 60 },
+        { campo: 'telefono', etiqueta: 'El teléfono', tipo: 'telefono' },
+        { campo: 'password', etiqueta: 'La contraseña', tipo: 'password', min: 8 },
+    ]),
+    registrarUsuarioController
+);
 
-// Nueva ruta para el video: POST /api/usuarios/token-prueba 
-router.post('/token-prueba', generarTokenPruebaController);
+// POST /api/usuarios/login — ingreso real con teléfono y contraseña
+router.post(
+    '/login',
+    validar([
+        { campo: 'telefono', etiqueta: 'El teléfono', tipo: 'telefono' },
+        { campo: 'password', etiqueta: 'La contraseña', tipo: 'password', min: 1 },
+    ]),
+    loginController
+);
+
+// GET /api/usuarios/yo — perfil y estado de pertenencia
+router.get('/yo', verificarAutenticacion, perfilController);
+
+// POST /api/usuarios/token-prueba — SOLO DESARROLLO
+//
+// Genera un token sin verificar contraseña: es un bypass de autenticación.
+// En producción la ruta ni siquiera se registra, para que no exista.
+if (!ES_PRODUCCION) {
+    router.post('/token-prueba', generarTokenPruebaController);
+    console.log('⚠️  Ruta de desarrollo activa: POST /api/usuarios/token-prueba');
+}
 
 export default router;

@@ -1,55 +1,88 @@
 import { Request, Response } from 'express';
 import * as usuarioService from '../services/usuario.service';
+import { CredencialesInvalidas, ConflictoDatos } from '../services/usuario.service';
+import { AuthRequest } from '../middlewares/auth.middleware';
 
-// TU CONTROLADOR EXISTENTE (Se mantiene intacto)
+/**
+ * POST /api/usuarios/registro
+ *
+ * Registra al vecino SIN comunidad y devuelve el token, para que entre directo
+ * y elija después si se une con un código o crea la suya.
+ */
 export const registrarUsuarioController = async (req: Request, res: Response): Promise<void> => {
     try {
-        console.log(`[CONTROLLER] POST /api/usuarios/registro recibido con body:`, req.body);
+        const { nombre, telefono, password } = req.body;
 
-        // 1. Extraemos exactamente las variables que TU BASE DE DATOS usa
-        const { nombre, telefono, password, codigoComunidad } = req.body;
+        const resultado = await usuarioService.registrarUsuario({ nombre, telefono, password });
 
-        // 2. Validamos que lleguen todas
-        if (!nombre || !telefono || !password || !codigoComunidad) {
-            res.status(400).json({ mensaje: 'Todos los campos son obligatorios' });
+        res.status(201).json({
+            mensaje: 'Cuenta creada con éxito.',
+            ...resultado,
+        });
+    } catch (error) {
+        if (error instanceof ConflictoDatos) {
+            res.status(409).json({ mensaje: error.message });
             return;
         }
-
-        // 3. Enviamos UN SOLO OBJETO (entre llaves) para cumplir con el argumento único
-        const nuevoUsuario = await usuarioService.registrarUsuario({
-            nombre,
-            telefono,
-            password,
-            codigoComunidad
-        });
-
-        // 4. Respondemos mostrando el teléfono en lugar del correo
-        res.status(201).json({
-            mensaje: 'Usuario registrado con éxito',
-            usuario: {
-                id_usuario: nuevoUsuario.id_usuario,
-                nombre: nuevoUsuario.nombre,
-                telefono: nuevoUsuario.telefono
-            }
-        });
-    } catch (error: any) {
-        res.status(400).json({ mensaje: error.message });
+        console.error('[registro]', error);
+        res.status(500).json({ mensaje: 'No pudimos crear la cuenta. Inténtalo de nuevo.' });
     }
 };
 
-// ⚡ NUEVO CONTROLADOR: Genera un Token JWT rápido para las pruebas en Postman y la grabación
+/**
+ * POST /api/usuarios/login
+ *
+ * Ingreso real: verifica la contraseña contra el hash bcrypt.
+ */
+export const loginController = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { telefono, password } = req.body;
+
+        const resultado = await usuarioService.login(telefono, password);
+
+        res.status(200).json({
+            mensaje: 'Ingreso exitoso.',
+            ...resultado,
+        });
+    } catch (error) {
+        if (error instanceof CredencialesInvalidas) {
+            // 401 y mensaje genérico: no se revela si el teléfono existe.
+            res.status(401).json({ mensaje: error.message });
+            return;
+        }
+        console.error('[login]', error);
+        res.status(500).json({ mensaje: 'No pudimos procesar el ingreso.' });
+    }
+};
+
+/**
+ * GET /api/usuarios/yo
+ *
+ * Perfil y estado de pertenencia. La app lo consulta al arrancar para decidir
+ * a qué pantalla entrar.
+ */
+export const perfilController = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const perfil = await usuarioService.obtenerPerfil(req.user!.id_usuario);
+        res.status(200).json(perfil);
+    } catch (error) {
+        console.error('[perfil]', error);
+        res.status(500).json({ mensaje: 'No pudimos obtener tu perfil.' });
+    }
+};
+
+/**
+ * POST /api/usuarios/token-prueba — SOLO DESARROLLO
+ *
+ * ⚠️ Genera un token sin verificar contraseña. La ruta está bloqueada en
+ * producción (ver `usuario.routes.ts`).
+ */
 export const generarTokenPruebaController = async (req: Request, res: Response): Promise<void> => {
     try {
-        console.log(`[CONTROLLER] POST /api/usuarios/token-prueba recibido con body:`, req.body);
-
-        // Para pruebas rápidas, si no envían nada en el body, asumimos el Vecino #1 de la Comunidad #1
-        const id_usuario = req.body.id_usuario || 1;
-        const id_comunidad = req.body.id_comunidad || 1;
-
-        const resultado = await usuarioService.loginVecinoPrueba(Number(id_usuario), Number(id_comunidad));
-
+        const id_usuario = Number(req.body?.id_usuario) || 1;
+        const resultado = await usuarioService.generarTokenPrueba(id_usuario);
         res.status(200).json(resultado);
     } catch (error: any) {
-        res.status(500).json({ mensaje: error.message || 'Error al generar el token' });
+        res.status(400).json({ mensaje: error?.message ?? 'No se pudo generar el token.' });
     }
 };

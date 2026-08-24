@@ -2,17 +2,24 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
+// Se importa ANTES que cualquier otra cosa: valida la configuración y aborta el
+// arranque si falta JWT_SECRET, en lugar de firmar tokens con un secreto por
+// defecto escrito en el repositorio.
+import { PORT, ES_PRODUCCION } from './config/entorno';
+import './config/firebase';
+
 //IMPORTACIONES
 import comunidadRoutes from './routes/comunidad.routes';
 import usuarioRoutes from './routes/usuario.routes';
 
 import alertaRoutes from './routes/alerta.routes';
+import notificacionRoutes from './routes/notificacion.routes';
+import dispositivoRoutes from './routes/dispositivo.routes';
 
 import './services/notificacion.worker';
 
 
 const app = express();
-const PORT = process.env.PORT || 3333;
 
 app.use(cors());
 app.use(express.json());
@@ -39,7 +46,10 @@ app.use('/api/comunidades', comunidadRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 
 app.use('/api/alertas', alertaRoutes);
+app.use('/api/notificaciones', notificacionRoutes);
+app.use('/api/dispositivos', dispositivoRoutes);
 
-app.listen(Number(PORT), '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
+    console.log(`Entorno: ${ES_PRODUCCION ? 'PRODUCCIÓN' : 'desarrollo'}`);
 });

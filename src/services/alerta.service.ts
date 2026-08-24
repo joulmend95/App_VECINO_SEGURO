@@ -1,82 +1,120 @@
 import prisma from '../config/prisma';
 import NodeCache from 'node-cache';
+import { EstadoAlerta } from '@prisma/client';
 import { colaTrabajo } from './notificacion.worker';
 
-// Instancia de caché: TTL de 60 segundos por defecto
+// Caché de listados: TTL de 60 segundos.
 const cacheAlertas = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 
-// ==========================================
-// 1. EMITIR ALERTA (Optimizado + Asíncrono + Invalidación)
-// ==========================================
-export const emitirAlerta = async (tipo_alerta: string, id_usuario: number, id_comunidad: number) => {
-  //  OPTIMIZACIÓN 1: Eliminamos el `prisma.usuario.findUnique` redundante.
-  // Como el middleware JWT ya validó que el id_usuario es legítimo, insertamos directamente.
-  
-  const nuevaAlerta = await prisma.alerta.create({
-    data: {
-      tipo_alerta: tipo_alerta,
-      id_usuario: id_usuario,
-      estado: 'Activa'
+/**
+ * Control de frecuencia por vecino.
+ *
+ * El botón de pánico es un endpoint sin freno: sin esto, un toque repetido (o
+ * un gesto mal calibrado) inunda de notificaciones a toda la comunidad y la
+ * gente acaba silenciando la app, que es justo lo contrario de lo que se busca.
+ */
+const cacheFrecuencia = new NodeCache({ stdTTL: 60, checkperiod: 30 });
+const SEGUNDOS_ENTRE_ALERTAS = 60;
+
+class DemasiadasAlertas extends Error {
+    constructor(segundosRestantes: number) {
+        super(`Espera ${segundosRestantes} segundos antes de emitir otra alerta.`);
+        this.name = 'DemasiadasAlertas';
     }
-  });
+}
 
-  //  OPTIMIZACIÓN 2: Tarea Asíncrona (No esperamos a que termine para responder al celular)
-  colaTrabajo.emit('procesar-alerta-comunitaria', {
-    id_alerta: nuevaAlerta.id_alerta,
-    id_comunidad: id_comunidad,
-    id_emisor: id_usuario
-  });
+export interface EmitirAlertaInput {
+    tipo_alerta: string;
+    descripcion: string | null;
+    es_panico: boolean;
+    latitud: number | null;
+    longitud: number | null;
+    id_usuario: number;
+    id_comunidad: number;
+}
 
-  //  OPTIMIZACIÓN 3: Invalidación Explícita de Caché
-  // Al crearse una nueva emergencia, borramos la memoria vieja de esa comunidad
-  const cacheKey = `alertas_comunidad_${id_comunidad}`;
-  cacheAlertas.del(cacheKey);
-  console.log(`🗑️ [CACHÉ INVALIDADA] Se purgó la caché de la comunidad #${id_comunidad}`);
+// ==========================================
+// 1. EMITIR ALERTA
+// ==========================================
+export const emitirAlerta = async (datos: EmitirAlertaInput) => {
+    const claveFrecuencia = `ultima_alerta_${datos.id_usuario}`;
+    const ultima = cacheFrecuencia.get<number>(claveFrecuencia);
 
-  return nuevaAlerta;
+    if (ultima) {
+        const transcurridos = Math.floor((Date.now() - ultima) / 1000);
+        const restantes = SEGUNDOS_ENTRE_ALERTAS - transcurridos;
+        if (restantes > 0) throw new DemasiadasAlertas(restantes);
+    }
+
+    const nuevaAlerta = await prisma.alerta.create({
+        data: {
+            tipo_alerta: datos.tipo_alerta,
+            descripcion: datos.descripcion,
+            es_panico: datos.es_panico,
+            latitud: datos.latitud,
+            longitud: datos.longitud,
+            id_usuario: datos.id_usuario,
+            estado: EstadoAlerta.ACTIVA,
+        },
+        include: {
+            usuario: { select: { id_usuario: true, nombre: true } },
+        },
+    });
+
+    cacheFrecuencia.set(claveFrecuencia, Date.now());
+
+    // Tarea asíncrona: no se espera para responder al teléfono.
+    colaTrabajo.emit('procesar-alerta-comunitaria', {
+        id_alerta: nuevaAlerta.id_alerta,
+        id_comunidad: datos.id_comunidad,
+        id_emisor: datos.id_usuario,
+        es_panico: datos.es_panico,
+    });
+
+    // Invalidación explícita: al aparecer una emergencia, la lista en caché
+    // queda obsoleta de inmediato.
+    cacheAlertas.del(`alertas_comunidad_${datos.id_comunidad}`);
+    console.log(`🗑️  [CACHÉ INVALIDADA] Comunidad #${datos.id_comunidad}`);
+
+    return nuevaAlerta;
 };
 
 // ==========================================
-// 2. OBTENER ALERTAS (Cache-Aside + Solución N+1 + Eager Loading)
+// 2. OBTENER ALERTAS (Cache-Aside + Eager Loading, sin N+1)
 // ==========================================
 export const obtenerAlertasPorComunidad = async (id_comunidad: number) => {
-  const cacheKey = `alertas_comunidad_${id_comunidad}`;
+    const cacheKey = `alertas_comunidad_${id_comunidad}`;
 
-  // PASO 1 (Cache-Aside): ¿Está en memoria?
-  const dataEnCache = cacheAlertas.get(cacheKey);
-  if (dataEnCache) {
-    console.log(` [CACHÉ HIT] Devolviendo alertas de comunidad #${id_comunidad} desde Memoria (< 3ms)`);
-    return { fuente: 'CACHE_MEMORIA', data: dataEnCache };
-  }
-
-  console.log(`🔍 [CACHÉ MISS] Consultando PostgreSQL en Base de Datos...`);
-
-  // PASO 2: Consulta Optimizada (Solución N+1 mediante Eager Loading)
-  // En una SOLA consulta SQL (JOIN) traemos las alertas y los datos del vecino autor
-  const alertasBD = await prisma.alerta.findMany({
-    where: {
-      usuario: {
-        id_comunidad: id_comunidad
-      },
-      estado: 'Activa'
-    },
-    orderBy: { fecha_hora: 'desc' },
-    take: 20, // Paginación: solo las últimas 20 para no sobrecargar el móvil
-    
-    // EAGER LOADING con Selección de Campos (Seguridad + Rendimiento)
-    include: {
-      usuario: {
-        select: {
-          id_usuario: true,
-          nombre: true,
-          telefono: true,
-          // NUNCA traemos el campo 'password' ni campos innecesarios
-        }
-      }
+    const dataEnCache = cacheAlertas.get(cacheKey);
+    if (dataEnCache) {
+        console.log(`⚡ [CACHÉ HIT] Comunidad #${id_comunidad} desde memoria`);
+        return { fuente: 'CACHE_MEMORIA', data: dataEnCache };
     }
-  });
 
-  // PASO 3 (Cache-Aside): Guardamos en memoria con TTL de 60s y retornamos
-  cacheAlertas.set(cacheKey, alertasBD);
-  return { fuente: 'BASE_DE_DATOS_POSTGRESQL', data: alertasBD };
+    console.log(`🔍 [CACHÉ MISS] Consultando PostgreSQL...`);
+
+    // Una sola consulta con JOIN: trae las alertas y el vecino autor.
+    const alertasBD = await prisma.alerta.findMany({
+        where: {
+            usuario: { id_comunidad },
+            estado: EstadoAlerta.ACTIVA,
+        },
+        // El pánico primero: en una emergencia, lo urgente encabeza la lista.
+        orderBy: [{ es_panico: 'desc' }, { fecha_hora: 'desc' }],
+        take: 20,
+        include: {
+            usuario: {
+                select: { id_usuario: true, nombre: true, telefono: true },
+                // Nunca se incluye 'password'.
+            },
+        },
+    });
+
+    cacheAlertas.set(cacheKey, alertasBD);
+    return { fuente: 'BASE_DE_DATOS_POSTGRESQL', data: alertasBD };
+};
+
+/** Permite invalidar la caché desde otros servicios (p. ej. al cerrar una alerta). */
+export const invalidarCacheComunidad = (id_comunidad: number): void => {
+    cacheAlertas.del(`alertas_comunidad_${id_comunidad}`);
 };

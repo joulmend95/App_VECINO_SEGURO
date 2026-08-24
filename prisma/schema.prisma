@@ -8,45 +8,154 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// 1. Entidad Comunidad
+// ============================================================================
+// ENUMERACIONES
+// ============================================================================
+
+/// Rol del vecino dentro de su comunidad.
+///
+/// Antes era texto libre con default "Vecino", lo que permitía escribir
+/// cualquier cosa y comparar mal por mayúsculas. Como enum, la base de datos
+/// impide valores inválidos.
+enum RolUsuario {
+  VECINO
+  ADMIN
+}
+
+/// Estado de una solicitud de ingreso a una comunidad.
+enum EstadoSolicitud {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+}
+
+/// Estado del ciclo de vida de una alerta.
+enum EstadoAlerta {
+  ACTIVA
+  RESUELTA
+  CANCELADA
+}
+
+// ============================================================================
+// ENTIDADES
+// ============================================================================
+
+/// 1. Comunidad (urbanización, barrio o conjunto residencial)
 model Comunidad {
-  id_comunidad     Int       @id @default(autoincrement())
-  codigo_unico     String    @unique
+  id_comunidad     Int      @id @default(autoincrement())
+  /// Código que el administrador comparte para que otros soliciten ingresar.
+  codigo_unico     String   @unique
   nombre_comunidad String
-  fecha_creacion   DateTime  @default(now())
-  usuarios         Usuario[]
+  fecha_creacion   DateTime @default(now())
+
+  /// Quién creó la comunidad. Es su administrador.
+  id_admin Int?
+  admin    Usuario? @relation("AdminDeComunidad", fields: [id_admin], references: [id_usuario])
+
+  usuarios    Usuario[]            @relation("MiembroDeComunidad")
+  solicitudes SolicitudMembresia[]
 }
 
-// 2. Entidad Usuario
+/// 2. Usuario (vecino)
 model Usuario {
-  id_usuario       Int            @id @default(autoincrement())
-  nombre           String
-  telefono         String         @unique 
-  password         String         
-  rol              String         @default("Vecino") 
-  id_comunidad     Int
-  comunidad        Comunidad      @relation(fields: [id_comunidad], references: [id_comunidad])
-  alertas          Alerta[]
-  notificaciones   Notificacion[]
+  id_usuario Int        @id @default(autoincrement())
+  nombre     String
+  /// Identidad de ingreso. El vecino inicia sesión con teléfono + contraseña.
+  telefono   String     @unique
+  /// Hash bcrypt. Nunca se devuelve en ninguna respuesta de la API.
+  password   String
+  rol        RolUsuario @default(VECINO)
+
+  /// NULL mientras el vecino no pertenezca a ninguna comunidad.
+  ///
+  /// Es el cambio que habilita el flujo pedido: registrarse primero y elegir
+  /// después entre unirse a una comunidad existente o crear una propia.
+  id_comunidad Int?
+  comunidad    Comunidad? @relation("MiembroDeComunidad", fields: [id_comunidad], references: [id_comunidad])
+
+  comunidadesAdministradas Comunidad[]          @relation("AdminDeComunidad")
+  solicitudes              SolicitudMembresia[]
+  dispositivos             Dispositivo[]
+  alertas                  Alerta[]
+  notificaciones           Notificacion[]
+
+  @@index([id_comunidad])
 }
 
-// 3. Entidad Alerta
+/// 3. Solicitud de ingreso a una comunidad
+///
+/// El vecino envía el código que le dio el administrador y queda PENDIENTE
+/// hasta que este la apruebe o la rechace.
+model SolicitudMembresia {
+  id_solicitud Int             @id @default(autoincrement())
+  estado       EstadoSolicitud @default(PENDIENTE)
+
+  id_usuario Int
+  usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+
+  id_comunidad Int
+  comunidad    Comunidad @relation(fields: [id_comunidad], references: [id_comunidad], onDelete: Cascade)
+
+  fecha_solicitud DateTime  @default(now())
+  fecha_resuelta  DateTime?
+
+  /// Impide que un vecino solicite dos veces a la misma comunidad.
+  @@unique([id_usuario, id_comunidad])
+  @@index([id_comunidad, estado])
+}
+
+/// 4. Dispositivo (token push del teléfono)
+///
+/// Necesario para que las alertas lleguen realmente al teléfono de los vecinos
+/// y no solo se guarden como filas en [Notificacion].
+model Dispositivo {
+  id_dispositivo Int      @id @default(autoincrement())
+  token_push     String   @unique
+  plataforma     String
+  actualizado_en DateTime @updatedAt
+
+  id_usuario Int
+  usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+
+  @@index([id_usuario])
+}
+
+/// 5. Alerta
 model Alerta {
-  id_alerta      Int            @id @default(autoincrement())
-  tipo_alerta    String         
-  fecha_hora     DateTime       @default(now())
-  estado         String         @default("Activa") 
-  id_usuario     Int
-  usuario        Usuario        @relation(fields: [id_usuario], references: [id_usuario])
+  id_alerta   Int          @id @default(autoincrement())
+  tipo_alerta String
+  descripcion String?
+  fecha_hora  DateTime     @default(now())
+  estado      EstadoAlerta @default(ACTIVA)
+
+  /// Emitida por el gesto de pánico (triple pulsación de volumen), sin que el
+  /// vecino pudiera elegir el tipo. Recibe la máxima prioridad de envío.
+  es_panico Boolean @default(false)
+
+  /// Ubicación en el momento del disparo, si hubo permiso concedido.
+  latitud  Float?
+  longitud Float?
+
+  id_usuario Int
+  usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario])
+
   notificaciones Notificacion[]
+
+  @@index([id_usuario, fecha_hora])
 }
 
-// 4. Entidad Notificación
+/// 6. Notificación entregada a un vecino
 model Notificacion {
-  id_notificacion     Int      @id @default(autoincrement())
-  estado_entrega      String   @default("Enviada") 
-  id_alerta           Int
-  alerta              Alerta   @relation(fields: [id_alerta], references: [id_alerta])
+  id_notificacion Int       @id @default(autoincrement())
+  estado_entrega  String    @default("Enviada")
+  leida_en        DateTime?
+  fecha_creacion  DateTime  @default(now())
+
+  id_alerta Int
+  alerta    Alerta @relation(fields: [id_alerta], references: [id_alerta], onDelete: Cascade)
+
   id_usuario_receptor Int
-  usuarioReceptor     Usuario  @relation(fields: [id_usuario_receptor], references: [id_usuario])
+  usuarioReceptor     Usuario @relation(fields: [id_usuario_receptor], references: [id_usuario], onDelete: Cascade)
+
+  @@index([id_usuario_receptor, leida_en])
 }

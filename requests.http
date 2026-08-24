@@ -1,19 +1,160 @@
-### Registrar Usuario
-POST http://localhost:3333/api/usuarios/registro
+@host = http://localhost:3333/api
+
+### ==========================================================================
+### 1. REGISTRO — crea la cuenta SIN comunidad y devuelve token
+### ==========================================================================
+# @name registro
+POST {{host}}/usuarios/registro
 Content-Type: application/json
 
 {
-  "nombre": "Jorge",
-  "telefono": "1234567890",
-  "password": "123456",
-  "codigoComunidad": "URB-2026"
+  "nombre": "Ana Vera",
+  "telefono": "0987654321",
+  "password": "clave12345"
 }
 
-### Crear Comunidad
-POST http://localhost:3333/api/comunidades
+### ==========================================================================
+### 2. INGRESO — verifica la contraseña contra el hash bcrypt
+### ==========================================================================
+# @name login
+POST {{host}}/usuarios/login
 Content-Type: application/json
 
 {
-  "codigo": "URB-2026",
-  "nombre": "Urbanización El Bosque"
+  "telefono": "0987654321",
+  "password": "clave12345"
+}
+
+@token = {{login.response.body.token}}
+
+### --- Contraseña incorrecta → 401 con mensaje genérico -------------------
+POST {{host}}/usuarios/login
+Content-Type: application/json
+
+{
+  "telefono": "0987654321",
+  "password": "esta-no-es"
+}
+
+### --- Teléfono inexistente → MISMO mensaje ------------------------------
+# No revela qué teléfonos están registrados.
+POST {{host}}/usuarios/login
+Content-Type: application/json
+
+{
+  "telefono": "0000000000",
+  "password": "clave12345"
+}
+
+### --- Validación de entrada → 400 con errores por campo -----------------
+POST {{host}}/usuarios/registro
+Content-Type: application/json
+
+{
+  "nombre": "X",
+  "telefono": "123",
+  "password": "abc"
+}
+
+### ==========================================================================
+### 3. PERFIL — estado de pertenencia (SIN_COMUNIDAD | PENDIENTE | ACTIVO)
+### ==========================================================================
+GET {{host}}/usuarios/yo
+Authorization: Bearer {{token}}
+
+### ==========================================================================
+### 4. COMUNIDAD
+### ==========================================================================
+
+### Crear comunidad — el creador queda como ADMIN y entra sin aprobación
+POST {{host}}/comunidades
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "codigo": "LOS-CEIBOS",
+  "nombre": "Ciudadela Los Ceibos"
+}
+
+### Validar un código antes de solicitar el ingreso
+GET {{host}}/comunidades/LOS-CEIBOS
+Authorization: Bearer {{token}}
+
+### ==========================================================================
+### 5. ALERTAS
+### ==========================================================================
+
+### Emitir alerta normal
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo_alerta": "Persona sospechosa",
+  "descripcion": "Sujeto merodeando frente a la casa 12"
+}
+
+### 🚨 Alerta de PÁNICO — sin tipo; el servidor la etiqueta
+# Es lo que enviará el gesto de triple pulsación de volumen.
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "es_panico": true,
+  "latitud": -1.0451,
+  "longitud": -80.4525
+}
+
+### Listar alertas de MI comunidad (el pánico encabeza la lista)
+GET {{host}}/alertas/comunidad
+Authorization: Bearer {{token}}
+
+### ==========================================================================
+### 6. PRUEBAS DE SEGURIDAD — todas deben FALLAR
+### ==========================================================================
+
+### Sin token → 401
+GET {{host}}/alertas/comunidad
+
+### Token con firma falsa → 403
+GET {{host}}/alertas/comunidad
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJpZF91c3VhcmlvIjo5OTl9.firma_falsa
+
+### Espiar otra comunidad con ?id_comunidad → el parámetro se IGNORA
+# Antes permitía leer las alertas de cualquier comunidad ajena.
+GET {{host}}/alertas/comunidad?id_comunidad=1
+Authorization: Bearer {{token}}
+
+### Emitir en nombre de otro vecino → el id del cuerpo se IGNORA
+# Antes: `req.user?.id_usuario || req.body.id_usuario` permitía suplantar.
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo_alerta": "Suplantación",
+  "id_usuario": 1,
+  "id_comunidad": 1
+}
+
+### Segunda alerta seguida → 429 (límite de frecuencia)
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo_alerta": "Spam"
+}
+
+### ==========================================================================
+### 7. SOLO DESARROLLO — bypass de autenticación
+### ==========================================================================
+# ⚠️ Genera un token SIN verificar contraseña.
+# Esta ruta no se registra cuando NODE_ENV=production.
+POST {{host}}/usuarios/token-prueba
+Content-Type: application/json
+
+{
+  "id_usuario": 1
 }

@@ -1,0 +1,331 @@
+import 'package:flutter/material.dart';
+
+import 'package:go_router/go_router.dart';
+
+import '../modelos/alerta.dart';
+import '../navegacion/rutas.dart';
+import '../servicios/cliente_api.dart';
+import '../servicios/dependencias.dart';
+import '../servicios/servicio_alertas.dart';
+import '../theme/tokens_semanticos.dart';
+import '../widgets/boton_accion.dart';
+import '../widgets/campo_texto.dart';
+import '../widgets/tarjeta_alerta.dart';
+import '../widgets/vista_estado.dart';
+
+/// **P4 — Muro de Alertas de la Comunidad**
+///
+/// Consume `GET /api/alertas/comunidad`. Ver `docs/01-inventario-pantallas.md`.
+///
+/// Está ensamblada **exclusivamente** con componentes del catálogo:
+/// [CampoTexto], [TarjetaAlerta], [BotonAccion] y [VistaEstado].
+/// No declara ni un color, ni un tamaño de fuente, ni un radio literal: todo
+/// lo obtiene de `context.tokens` y `context.textos`.
+class PantallaMuroAlertas extends StatefulWidget {
+  const PantallaMuroAlertas({super.key, this.api});
+
+  /// Inyectable para pruebas. En producción se toma el servicio compartido del
+  /// árbol de dependencias, para que toda la app use una sola sesión.
+  final ServicioAlertas? api;
+
+  @override
+  State<PantallaMuroAlertas> createState() => _PantallaMuroAlertasState();
+}
+
+class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
+  ServicioAlertas? _apiInyectada;
+  late final TextEditingController _buscarCtrl;
+
+  ServicioAlertas get _api => _apiInyectada ?? context.servicios.alertas;
+
+  /// Un único estado indivisible: no existe "cargando y con error a la vez".
+  EstadoVista<List<Alerta>> _estado = const VistaCargando();
+
+  /// Alertas tal como llegaron del servidor, antes de filtrar.
+  List<Alerta> _todas = const [];
+  String _filtro = '';
+  bool _refrescando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiInyectada = widget.api;
+    _buscarCtrl = TextEditingController();
+    // Se difiere al primer frame: la carga necesita el contexto heredado del
+    // que cuelgan las dependencias, y `initState` todavía no puede leerlo.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _cargar());
+  }
+
+  @override
+  void dispose() {
+    // El componente CampoTexto no posee el controlador: liberarlo es
+    // responsabilidad de quien lo crea.
+    //
+    // El cliente HTTP NO se cierra aquí: es compartido por toda la app y lo
+    // gestiona el contenedor de dependencias.
+    _buscarCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _cargar({bool esRefresco = false}) async {
+    if (!esRefresco) setState(() => _estado = const VistaCargando());
+    if (esRefresco) setState(() => _refrescando = true);
+
+    try {
+      final respuesta = await _api.obtenerAlertasComunidad();
+      if (!mounted) return;
+      _todas = respuesta.alertas;
+      setState(() {
+        _estado = _calcularEstado();
+        _refrescando = false;
+      });
+    } on ExcepcionApi catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _estado = VistaError(e.mensaje);
+        _refrescando = false;
+      });
+    }
+  }
+
+  /// Traduce los datos crudos al estado de la vista.
+  ///
+  /// Distingue dos vacíos distintos, que para el usuario NO son lo mismo:
+  /// no hay alertas en la comunidad, versus el filtro no encontró nada.
+  EstadoVista<List<Alerta>> _calcularEstado() {
+    if (_todas.isEmpty) return const VistaVacia();
+
+    final visibles = _filtrar(_todas, _filtro);
+    if (visibles.isEmpty) return const VistaVacia();
+
+    return VistaConDatos(visibles);
+  }
+
+  static List<Alerta> _filtrar(List<Alerta> alertas, String texto) {
+    final q = texto.trim().toLowerCase();
+    if (q.isEmpty) return alertas;
+    return alertas
+        .where(
+          (a) =>
+              a.tipoAlerta.toLowerCase().contains(q) ||
+              a.nombreVecino.toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  void _alCambiarFiltro(String valor) {
+    setState(() {
+      _filtro = valor;
+      // El filtro no vuelve a pedir datos: solo re-evalúa el estado local.
+      // Reintentar un error de red no es lo mismo que escribir en el buscador.
+      if (_estado is! VistaError) _estado = _calcularEstado();
+    });
+  }
+
+  bool get _filtroSinResultados =>
+      _todas.isNotEmpty && _filtro.trim().isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    // El nombre de la comunidad viene del perfil de la sesión: el vecino ve a
+    // cuál está emitiendo, que en una app de emergencias no es un detalle.
+    final comunidad = context.sesion.perfil?.comunidad?.nombre;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(comunidad ?? 'Alertas de mi comunidad'),
+        actions: [
+          if (context.sesion.perfil?.esAdmin ?? false)
+            IconButton(
+              onPressed: () => context.push(Rutas.solicitudes),
+              icon: const Icon(Icons.group_add_outlined),
+              tooltip: 'Solicitudes para unirse',
+              iconSize: t.tamano.iconoGrande,
+              constraints: BoxConstraints(
+                minWidth: t.tamano.areaTactilMinima,
+                minHeight: t.tamano.areaTactilMinima,
+              ),
+            ),
+          IconButton(
+            onPressed: _refrescando ? null : () => _cargar(esRefresco: true),
+            icon: const Icon(Icons.refresh),
+            // Área táctil e etiqueta semántica explícitas: un IconButton sin
+            // tooltip se anuncia como "botón" sin decir qué hace.
+            tooltip: 'Actualizar alertas',
+            iconSize: t.tamano.iconoGrande,
+            constraints: BoxConstraints(
+              minWidth: t.tamano.areaTactilMinima,
+              minHeight: t.tamano.areaTactilMinima,
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // --- Buscador (componente del catálogo) ---
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                t.espacio.margenPantalla,
+                t.espacio.entreGrupos,
+                t.espacio.margenPantalla,
+                t.espacio.entreElementos,
+              ),
+              child: CampoTexto(
+                controlador: _buscarCtrl,
+                etiqueta: 'Buscar alerta',
+                pista: 'Por tipo o por vecino',
+                icono: Icons.search,
+                tipoTeclado: TextInputType.text,
+                accionTeclado: TextInputAction.search,
+                onCambio: _alCambiarFiltro,
+                accionSufijo: _filtro.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: 'Limpiar búsqueda',
+                        onPressed: () {
+                          _buscarCtrl.clear();
+                          _alCambiarFiltro('');
+                        },
+                      ),
+              ),
+            ),
+
+            // --- Contenido: los 4 estados los resuelve el catálogo ---
+            Expanded(
+              child: VistaEstado<List<Alerta>>(
+                estado: _estado,
+                mensajeVacio: _filtroSinResultados
+                    ? 'Sin resultados para "$_filtro"'
+                    : 'Todo tranquilo por aquí',
+                detalleVacio: _filtroSinResultados
+                    ? 'Prueba con otro tipo de alerta o el nombre de un vecino.'
+                    : 'No hay alertas activas en tu comunidad en este momento.',
+                iconoVacio: _filtroSinResultados
+                    ? Icons.search_off
+                    : Icons.verified_user_outlined,
+                onReintentar: () => _cargar(),
+                accionVacio: _filtroSinResultados
+                    ? BotonAccion(
+                        texto: 'Limpiar búsqueda',
+                        icono: Icons.close,
+                        variante: VarianteBoton.secundario,
+                        anchoCompleto: false,
+                        onPressed: () {
+                          _buscarCtrl.clear();
+                          _alCambiarFiltro('');
+                        },
+                      )
+                    : null,
+                constructorContenido: (context, alertas) =>
+                    _ListaAlertas(alertas: alertas, onRefrescar: _cargar),
+              ),
+            ),
+
+            // --- Acción principal ---
+            Padding(
+              padding: EdgeInsets.all(t.espacio.margenPantalla),
+              child: BotonAccion(
+                texto: 'Emitir alerta de emergencia',
+                icono: Icons.warning_amber_rounded,
+                variante: VarianteBoton.peligro,
+                etiquetaSemantica:
+                    'Emitir alerta de emergencia a toda la comunidad',
+                // `push` y no `go`: al volver de emitir se regresa al muro, en
+                // lugar de reemplazarlo en la pila de navegación.
+                onPressed: () async {
+                  await context.push(Rutas.emitirAlerta);
+                  // Al volver puede haber una alerta nueva.
+                  if (mounted) await _cargar(esRefresco: true);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lista de alertas con arrastrar-para-refrescar.
+///
+/// Se extrae como widget aparte para que el `constructorContenido` de
+/// [VistaEstado] reciba datos ya desempaquetados y no nulos.
+class _ListaAlertas extends StatelessWidget {
+  const _ListaAlertas({required this.alertas, required this.onRefrescar});
+
+  final List<Alerta> alertas;
+  final Future<void> Function() onRefrescar;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return RefreshIndicator(
+      onRefresh: onRefrescar,
+      color: t.color.primario,
+      child: ListView.separated(
+        // `always` garantiza que el gesto de refrescar funcione incluso
+        // cuando la lista es más corta que la pantalla.
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+          t.espacio.margenPantalla,
+          t.espacio.entreElementos,
+          t.espacio.margenPantalla,
+          t.espacio.separacionSeccion,
+        ),
+        itemCount: alertas.length,
+        separatorBuilder: (_, _) => SizedBox(height: t.espacio.entreGrupos),
+        itemBuilder: (context, indice) {
+          final alerta = alertas[indice];
+          return TarjetaAlerta(
+            tipoAlerta: alerta.tipoAlerta,
+            nombreVecino: alerta.nombreVecino,
+            fechaHora: alerta.fechaHora,
+            // La categoría y la urgencia las deduce el propio componente a
+            // partir del texto libre que envía el backend.
+            onTap: () => _mostrarDetalle(context, alerta),
+            accionFinal: const _IndicadorDetalle(),
+          );
+        },
+      ),
+    );
+  }
+
+  void _mostrarDetalle(BuildContext context, Alerta alerta) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Alerta #${alerta.idAlerta}: ${alerta.tipoAlerta}'),
+      ),
+    );
+  }
+}
+
+/// Contenido delegado que la pantalla inyecta en `TarjetaAlerta.accionFinal`.
+///
+/// Vive en la pantalla, no en el catálogo: es una decisión de este muro, no
+/// una regla del sistema de diseño.
+///
+/// Antes se mostraba aquí un chip con el estado de la alerta, pero el backend
+/// solo devuelve alertas con estado "Activa" (ver `alerta.service.ts`), así que
+/// el chip repetía el mismo texto en todas las tarjetas sin aportar nada. Se
+/// sustituyó por el indicador de que la tarjeta es pulsable.
+class _IndicadorDetalle extends StatelessWidget {
+  const _IndicadorDetalle();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return ExcludeSemantics(
+      child: Icon(
+        Icons.chevron_right,
+        size: context.escalarAdorno(t.tamano.iconoGrande),
+        color: t.color.onSuperficieSutil,
+      ),
+    );
+  }
+}

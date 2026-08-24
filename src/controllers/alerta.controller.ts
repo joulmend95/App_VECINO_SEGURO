@@ -2,61 +2,74 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import * as alertaService from '../services/alerta.service';
 
-
-import { colaTrabajo } from '../services/notificacion.worker'; 
-
-// 1. CONTROLADOR EXISTENTE OPTIMIZADO (Emitir Alerta + Worker Asíncrono + Invalidación de Caché)
+/**
+ * POST /api/alertas/emitir
+ *
+ * Emite una alerta a la comunidad del vecino autenticado.
+ *
+ * Cambio de seguridad respecto a la versión anterior: el `id_usuario` y el
+ * `id_comunidad` salen EXCLUSIVAMENTE de la sesión. Antes existía un respaldo
+ * `req.user?.id_usuario || req.body.id_usuario` que permitía emitir alertas en
+ * nombre de otro vecino simplemente enviándolo en el cuerpo de la petición.
+ */
 export const emitirAlertaController = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { tipo_alerta } = req.body;
+        const { tipo_alerta, descripcion, es_panico, latitud, longitud } = req.body;
 
-        // Validamos que nos envíen el tipo de alerta
-        if (!tipo_alerta) {
-            res.status(400).json({ mensaje: 'El tipo_alerta es obligatorio' });
+        const esPanico = es_panico === true;
+
+        // El pánico se dispara por gesto, sin que el vecino elija tipo: el
+        // servidor lo etiqueta. En cualquier otro caso el tipo es obligatorio.
+        if (!esPanico && (!tipo_alerta || String(tipo_alerta).trim() === '')) {
+            res.status(400).json({ mensaje: 'Debes indicar el tipo de alerta.' });
             return;
         }
 
-        // ⚡ OPTIMIZACIÓN: Extraemos el usuario y comunidad desde la memoria (JWT) sin ir a la BD.
-        // Si por alguna razón están probando sin token (modo desarrollo), usamos un fallback seguro.
-        const id_usuario = req.user?.id_usuario || req.body.id_usuario;
-        const id_comunidad = req.user?.id_comunidad || req.body.id_comunidad || 1;
+        const { id_usuario, id_comunidad } = req.user!;
 
-        if (!id_usuario) {
-            res.status(400).json({ mensaje: 'No se pudo identificar al usuario emisor de la alerta.' });
-            return;
-        }
-
-        // Llamamos al servicio optimizado (guarda alerta, dispara worker asíncrono e invalida caché)
-        const nuevaAlerta = await alertaService.emitirAlerta(tipo_alerta, Number(id_usuario), Number(id_comunidad));
-
-        // 👇 2. DISPARAMOS EL EVENTO AL WORKER (En segundo plano) 👇
-        colaTrabajo.emit('procesar-alerta-comunitaria', {
-            id_alerta: nuevaAlerta.id_alerta,
-            id_comunidad: Number(id_comunidad),
-            id_emisor: Number(id_usuario)
+        const nuevaAlerta = await alertaService.emitirAlerta({
+            tipo_alerta: esPanico ? 'Emergencia (botón de pánico)' : String(tipo_alerta).trim(),
+            descripcion: descripcion ? String(descripcion).trim() : null,
+            es_panico: esPanico,
+            latitud: typeof latitud === 'number' ? latitud : null,
+            longitud: typeof longitud === 'number' ? longitud : null,
+            id_usuario,
+            id_comunidad: id_comunidad!,
         });
 
-        // ⚡ Retornamos 202 Accepted indicando que el proceso asíncrono comunitario inició
         res.status(202).json({
-            mensaje: '¡Alerta comunitaria emitida exitosamente! Procesando notificaciones a vecinos en segundo plano...',
-            alerta: nuevaAlerta
+            mensaje: esPanico
+                ? '¡Alerta de emergencia enviada! Notificando a tu comunidad.'
+                : 'Alerta emitida. Notificando a tu comunidad en segundo plano.',
+            alerta: nuevaAlerta,
         });
     } catch (error: any) {
-        res.status(400).json({ mensaje: error.message || 'Error al procesar la alerta.' });
+        if (error?.name === 'DemasiadasAlertas') {
+            res.status(429).json({ mensaje: error.message });
+            return;
+        }
+        console.error('[emitirAlerta]', error);
+        res.status(500).json({ mensaje: 'No pudimos emitir la alerta.' });
     }
 };
 
-// 2. NUEVO CONTROLADOR PARA EL TALLER (Probar Caché y Solución N+1 en Postman/Insomnia)
-export const listarAlertasComunidadController = async (req: AuthRequest, res: Response): Promise<void> => {
+/**
+ * GET /api/alertas/comunidad
+ *
+ * Lista las alertas activas de la comunidad del vecino autenticado.
+ *
+ * El parámetro `?id_comunidad` ya NO se acepta: permitía leer las alertas de
+ * cualquier comunidad ajena con solo cambiarlo en la URL.
+ */
+export const listarAlertasComunidadController = async (
+    req: AuthRequest,
+    res: Response
+): Promise<void> => {
     try {
-        // Extraemos la comunidad del vecino autenticado
-        const id_comunidad = req.user?.id_comunidad || Number(req.query.id_comunidad) || 1;
-
-        // Llamamos al servicio que maneja Cache-Aside y Eager Loading (sin N+1)
-        const resultado = await alertaService.obtenerAlertasPorComunidad(Number(id_comunidad));
-
+        const resultado = await alertaService.obtenerAlertasPorComunidad(req.user!.id_comunidad!);
         res.status(200).json(resultado);
-    } catch (error: any) {
-        res.status(400).json({ mensaje: error.message || 'Error al obtener las alertas de la comunidad.' });
+    } catch (error) {
+        console.error('[listarAlertas]', error);
+        res.status(500).json({ mensaje: 'No pudimos obtener las alertas.' });
     }
 };

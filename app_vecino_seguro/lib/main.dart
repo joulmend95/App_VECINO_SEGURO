@@ -1,134 +1,155 @@
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'dart:async';
 
-void main() {
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import 'firebase_options.dart';
+import 'modelos/perfil_vecino.dart';
+import 'navegacion/rutas.dart';
+import 'servicios/dependencias.dart';
+import 'screens/pantalla_cuenta_atras.dart';
+import 'servicios/cola_panico.dart';
+import 'servicios/push.dart';
+import 'servicios/sesion.dart';
+import 'theme/tema_app.dart';
+
+/// Manejador de avisos con la app cerrada o en segundo plano.
+///
+/// Debe ser una función de nivel superior con `@pragma('vm:entry-point')`:
+/// Android la ejecuta en un aislado (*isolate*) separado, sin acceso al estado
+/// de la aplicación. Sin la anotación, el compilador la eliminaría en release
+/// y los avisos dejarían de procesarse justo en la versión que usan los
+/// vecinos.
+@pragma('vm:entry-point')
+Future<void> manejarAvisoEnSegundoPlano(RemoteMessage mensaje) async {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  debugPrint('[PUSH] Aviso en segundo plano: ${mensaje.messageId}');
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Si Firebase falla al iniciar, la app arranca igual: las alertas se siguen
+  // viendo en el muro y en la bandeja. El push es una comodidad, no la vía
+  // única de enterarse.
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    FirebaseMessaging.onBackgroundMessage(manejarAvisoEnSegundoPlano);
+  } catch (e) {
+    debugPrint('[PUSH] Firebase no disponible: $e');
+  }
+
   runApp(const VecinoSeguroApp());
 }
 
-class VecinoSeguroApp extends StatelessWidget {
+class VecinoSeguroApp extends StatefulWidget {
   const VecinoSeguroApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Vecino Seguro',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const APIConnectionScreen(),
-    );
-  }
+  State<VecinoSeguroApp> createState() => _VecinoSeguroAppState();
 }
 
-class APIConnectionScreen extends StatefulWidget {
-  const APIConnectionScreen({super.key});
+class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
+  late final Sesion _sesion;
+  late final Servicios _servicios;
+  late final GoRouter _enrutador;
 
   @override
-  State<APIConnectionScreen> createState() => _APIConnectionScreenState();
-}
+  void initState() {
+    super.initState();
 
-class _APIConnectionScreenState extends State<APIConnectionScreen> {
-  String _apiResponse = "Presiona el botón para consultar tu Backend";
-  bool _isLoading = false;
+    // Una sola sesión y un solo cliente HTTP para toda la app. Si cada pantalla
+    // creara los suyos, cada una tendría su propio token y el cierre automático
+    // ante un 401 solo afectaría a una.
+    _sesion = Sesion();
+    _servicios = Servicios(sesion: _sesion);
 
+    // El enrutador escucha la sesión: iniciar sesión, cerrarla o ser aprobado
+    // por el administrador redirigen solos.
+    _enrutador = construirEnrutador(_sesion);
 
-  final String apiUrl = 'http://10.0.2.2:3333/api/usuarios/token-prueba'; 
-  
- 
-  final String miToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZF91c3VhcmlvIjoxLCJpZF9jb211bmlkYWQiOjEsInJvbCI6IlZFQ0lOT19BQ1RJVk8iLCJpYXQiOjE3ODY5NDQ0MTQsImV4cCI6MTc4Njk1ODgxNH0.2uMcEdDJQ3PiFowEEgIW3YmgGSaRVnPBEu6ii1ohdJ4"; 
+    // El push sigue el ciclo de vida de la sesión: se registra el dispositivo
+    // al autenticarse y se da de baja al cerrar sesión. Sin la baja, el
+    // teléfono seguiría recibiendo alertas de una comunidad ajena.
+    _push = ServicioPush(_servicios.notificaciones);
+    _sesion.addListener(_sincronizarPush);
 
-  Future<void> _fetchDataFromBackend() async {
-    setState(() {
-      _isLoading = true;
-      _apiResponse = "Conectando con Node.js en localhost:3333...";
-    });
+    // El gesto de pánico solo se escucha con sesión iniciada: sin saber a qué
+    // comunidad pertenece el vecino, la alerta no tendría destinatarios.
+    _servicios.panico.escuchar();
+    _gestos = _servicios.panico.gestos.listen((_) => _alDetectarPanico());
+  }
 
-    try {
-      final response = await http.post( // Cambiado a POST por si tu ruta lo requiere
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $miToken', 
-        },
-        // Si tu endpoint requiere body, envíalo, si no, déjalo vacío
-        body: jsonEncode({"id_usuario": 1, "id_comunidad": 1}),
-      );
+  late final ServicioPush _push;
+  StreamSubscription<void>? _gestos;
+  bool _pushActivo = false;
+  bool _mostrandoCuentaAtras = false;
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        setState(() {
-          _apiResponse = "¡ÉXITO! Status: ${response.statusCode}\n\nRespuesta:\n${response.body}";
-        });
-      } else {
-        setState(() {
-          _apiResponse = "ERROR: Status ${response.statusCode}\n\n${response.body}";
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _apiResponse = "Fallo de conexión: $e";
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
+  void _sincronizarPush() {
+    if (_sesion.autenticado && !_pushActivo) {
+      _pushActivo = true;
+      _push.iniciar();
+      // Al recuperar la sesión se reintenta lo que quedó sin enviar por falta
+      // de red: una petición de auxilio no debe perderse.
+      ColaPanico(alertas: _servicios.alertas).reintentar();
+    } else if (!_sesion.autenticado && _pushActivo) {
+      _pushActivo = false;
+      _push.detener();
     }
   }
 
+  /// Muestra la cuenta atrás cuando el servicio nativo detecta el gesto.
+  void _alDetectarPanico() {
+    // Sin sesión o sin comunidad aprobada no hay a quién avisar. Se ignora en
+    // silencio en vez de mostrar un error: el vecino no eligió abrir esto.
+    if (!_sesion.autenticado || !_sesion.membresia.esActiva) return;
+
+    // Evita apilar varias cuentas atrás si el gesto se repite.
+    if (_mostrandoCuentaAtras) return;
+
+    final contexto = _enrutador.routerDelegate.navigatorKey.currentContext;
+    if (contexto == null) return;
+
+    _mostrandoCuentaAtras = true;
+    PantallaCuentaAtras.mostrar(
+      contexto,
+    ).whenComplete(() => _mostrandoCuentaAtras = false);
+  }
+
+  @override
+  void dispose() {
+    _gestos?.cancel();
+    _sesion.removeListener(_sincronizarPush);
+    _servicios.cerrar();
+    _sesion.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Vecino Seguro - Prueba de API'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              const Icon(Icons.security, size: 60, color: Colors.deepPurple),
-              const SizedBox(height: 10),
-              const Text(
-                'Estado de la Conexión:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const SizedBox(height: 10),
-              // 🔥 EL ARREGLO VISUAL: Ahora el contenedor se expande y permite hacer scroll
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      _apiResponse,
-                      textAlign: TextAlign.left,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: _isLoading ? null : _fetchDataFromBackend,
-                icon: _isLoading 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
-                    : const Icon(Icons.cloud_sync),
-                label: const Text('Probar Conexión al Backend'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  textStyle: const TextStyle(fontSize: 16),
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
+    return Dependencias(
+      servicios: _servicios,
+      child: ListenableBuilder(
+        // Reconstruye cuando cambia la sesión, para que las pantallas lean el
+        // perfil actualizado (nombre de la comunidad, rol de administrador).
+        listenable: _sesion,
+        builder: (context, _) => MaterialApp.router(
+          title: 'Vecino Seguro',
+          debugShowCheckedModeBanner: false,
+
+          // Los tokens del sistema de diseño se inyectan una sola vez y quedan
+          // disponibles en todo el árbol vía `context.tokens`.
+          theme: TemaApp.claro,
+          darkTheme: TemaApp.oscuro,
+          themeMode: ThemeMode.system,
+
+          routerConfig: _enrutador,
         ),
       ),
     );
