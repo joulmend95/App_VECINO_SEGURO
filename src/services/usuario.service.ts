@@ -212,6 +212,88 @@ export const obtenerPerfil = async (id_usuario: number): Promise<PerfilVecino> =
 };
 
 // ============================================================================
+// EDICIÓN DEL PERFIL
+// ============================================================================
+
+export interface ActualizarPerfilInput {
+    nombre?: string;
+    telefono?: string;
+}
+
+/**
+ * Actualiza los datos visibles del vecino.
+ *
+ * El teléfono es la identidad de ingreso, así que cambiarlo tiene consecuencias:
+ * se comprueba que no lo tenga otro y se avisa al vecino de que a partir de ese
+ * momento entrará con el nuevo.
+ */
+export const actualizarPerfil = async (
+    id_usuario: number,
+    datos: ActualizarPerfilInput
+): Promise<PerfilVecino> => {
+    const cambios: { nombre?: string; telefono?: string } = {};
+
+    if (datos.nombre !== undefined) {
+        cambios.nombre = datos.nombre.trim();
+    }
+
+    if (datos.telefono !== undefined) {
+        const telefono = datos.telefono.trim();
+        const ocupado = await prisma.usuario.findUnique({ where: { telefono } });
+
+        // Si el teléfono es el suyo, no hay conflicto.
+        if (ocupado && ocupado.id_usuario !== id_usuario) {
+            throw new ConflictoDatos('Ese teléfono ya está registrado por otro vecino.');
+        }
+        cambios.telefono = telefono;
+    }
+
+    if (Object.keys(cambios).length === 0) {
+        throw new ConflictoDatos('No hay nada que actualizar.');
+    }
+
+    await prisma.usuario.update({ where: { id_usuario }, data: cambios });
+
+    return obtenerPerfil(id_usuario);
+};
+
+/**
+ * Cambia la contraseña.
+ *
+ * **Exige la contraseña actual.** Sin esa comprobación, alguien con acceso
+ * momentáneo al teléfono desbloqueado podría cambiarla y dejar fuera al dueño
+ * de su propia cuenta.
+ *
+ * ⚠️ Limitación conocida: los tokens ya emitidos siguen siendo válidos hasta
+ * caducar (7 días). Revocarlos exigiría una lista de tokens invalidados o un
+ * contador de versión por usuario; queda pendiente y está documentado en
+ * `docs/05-plan-modulos-faltantes.md`.
+ */
+export const cambiarPassword = async (
+    id_usuario: number,
+    passwordActual: string,
+    passwordNueva: string
+): Promise<void> => {
+    const usuario = await prisma.usuario.findUnique({ where: { id_usuario } });
+    if (!usuario) throw new Error('El usuario no existe.');
+
+    const coincide = await bcrypt.compare(passwordActual, usuario.password);
+    if (!coincide) {
+        throw new CredencialesInvalidas();
+    }
+
+    if (passwordActual === passwordNueva) {
+        throw new ConflictoDatos('La contraseña nueva debe ser distinta de la actual.');
+    }
+
+    const hash = await bcrypt.hash(passwordNueva, RONDAS_BCRYPT);
+    await prisma.usuario.update({
+        where: { id_usuario },
+        data: { password: hash },
+    });
+};
+
+// ============================================================================
 // SOLO DESARROLLO
 // ============================================================================
 

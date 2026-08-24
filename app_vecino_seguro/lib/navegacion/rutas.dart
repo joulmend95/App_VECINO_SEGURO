@@ -11,8 +11,10 @@ import '../screens/pantalla_ingreso.dart';
 import '../screens/pantalla_registro.dart';
 import '../screens/pantalla_solicitudes.dart';
 import '../screens/pantalla_unirme_comunidad.dart';
+import '../screens/pantalla_miembros.dart';
 import '../screens/pantalla_muro_alertas.dart';
 import '../screens/pantalla_notificaciones.dart';
+import '../screens/pantalla_perfil.dart';
 import '../servicios/sesion.dart';
 
 /// Rutas de la aplicación.
@@ -34,6 +36,8 @@ abstract final class Rutas {
   static const emitirAlerta = '/alertas/emitir';
   static const notificaciones = '/notificaciones';
   static const ajustesPanico = '/ajustes/panico';
+  static const perfil = '/perfil';
+  static const miembros = '/comunidad/miembros';
 
   /// Rutas accesibles sin haber iniciado sesión.
   static const publicas = {ingreso, registro};
@@ -109,6 +113,14 @@ GoRouter construirEnrutador(Sesion sesion) {
       GoRoute(
         path: Rutas.ajustesPanico,
         builder: (_, _) => const PantallaAjustesPanico(),
+      ),
+      GoRoute(
+        path: Rutas.perfil,
+        builder: (_, _) => const PantallaPerfil(),
+      ),
+      GoRoute(
+        path: Rutas.miembros,
+        builder: (_, _) => const PantallaMiembros(),
       ),
     ],
   );

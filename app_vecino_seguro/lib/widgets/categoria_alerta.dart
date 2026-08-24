@@ -110,6 +110,18 @@ enum CategoriaAlerta {
     urgencia: NivelUrgencia.media,
     nombre: 'Otra alerta',
     claves: [],
+  ),
+
+  /// Disparada por el gesto de pánico (triple pulsación de volumen), no por
+  /// texto libre. Nunca se deduce por palabras clave: `TarjetaAlerta` la
+  /// fuerza directamente cuando la alerta trae `es_panico: true`, porque el
+  /// backend etiqueta el `tipo_alerta` como "Emergencia (botón de pánico)" y
+  /// ese texto no debe competir con las claves de las demás categorías.
+  panico(
+    icono: Icons.emergency_outlined,
+    urgencia: NivelUrgencia.critica,
+    nombre: 'Emergencia',
+    claves: [],
   );
 
   const CategoriaAlerta({

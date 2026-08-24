@@ -2,6 +2,9 @@ import { Router } from 'express';
 import {
     crearComunidadController,
     buscarComunidadController,
+    listarMiembrosController,
+    expulsarMiembroController,
+    salirDeComunidadController,
 } from '../controllers/comunidad.controller';
 import {
     solicitarIngresoController,
@@ -66,6 +69,23 @@ router.post(
     ]),
     crearComunidadController
 );
+
+// POST /api/comunidades/salir — el vecino abandona su comunidad
+router.post('/salir', exigirComunidadActiva, salirDeComunidadController);
+
+// DELETE /api/comunidades/miembros/:id — el administrador expulsa a un vecino
+router.delete(
+    '/miembros/:id',
+    exigirComunidadActiva,
+    exigirAdmin,
+    expulsarMiembroController
+);
+
+// GET /api/comunidades/miembros — vecinos de mi comunidad.
+//
+// Antes de `/:codigo`, o Express interpretaría "miembros" como un código.
+// Cualquier vecino aprobado puede verla, no solo el administrador.
+router.get('/miembros', exigirComunidadActiva, listarMiembrosController);
 
 // GET /api/comunidades/:codigo — validar un código antes de solicitar ingreso
 router.get('/:codigo', buscarComunidadController);

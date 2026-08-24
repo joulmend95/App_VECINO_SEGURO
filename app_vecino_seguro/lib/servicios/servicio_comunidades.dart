@@ -1,3 +1,4 @@
+import '../modelos/miembro.dart';
 import '../modelos/solicitud.dart';
 import 'cliente_api.dart';
 
@@ -64,6 +65,32 @@ class ServicioComunidades {
       if (e.mensaje.contains('No existe')) return null;
       rethrow;
     }
+  }
+
+  /// `GET /api/comunidades/miembros` — vecinos de mi comunidad.
+  ///
+  /// Accesible a cualquier vecino aprobado, no solo al administrador.
+  Future<ListaMiembros> listarMiembros() async {
+    final json = await _api.obtener('/api/comunidades/miembros');
+    return ListaMiembros.desdeJson(json);
+  }
+
+  /// `DELETE /api/comunidades/miembros/:id` — el administrador expulsa.
+  ///
+  /// Las alertas del vecino **no se borran**: son historial de la comunidad,
+  /// igual que los mensajes de un grupo se quedan cuando alguien lo abandona.
+  Future<String> expulsarMiembro(int idUsuario) async {
+    final json = await _api.eliminar('/api/comunidades/miembros/$idUsuario');
+    return json['mensaje'] as String? ?? 'Vecino expulsado.';
+  }
+
+  /// `POST /api/comunidades/salir` — el vecino abandona su comunidad.
+  ///
+  /// El servidor rechaza la salida si es el administrador y quedan otros
+  /// vecinos: la comunidad se quedaría sin nadie que apruebe solicitudes.
+  Future<String> salirDeComunidad() async {
+    final json = await _api.publicar('/api/comunidades/salir');
+    return json['mensaje'] as String? ?? 'Saliste de la comunidad.';
   }
 
   // -------------------------------------------------------------------------

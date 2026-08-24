@@ -10,6 +10,8 @@ import '../servicios/servicio_alertas.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';
 import '../widgets/campo_texto.dart';
+import '../widgets/categoria_alerta.dart';
+import '../widgets/dialogo_confirmacion.dart';
 import '../widgets/tarjeta_alerta.dart';
 import '../widgets/vista_estado.dart';
 
@@ -46,6 +48,21 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   String _filtro = '';
   bool _refrescando = false;
 
+  /// Notificaciones sin leer, para el indicador de la barra superior.
+  int _noLeidas = 0;
+
+  /// Consulta el contador sin bloquear la pantalla: si falla, simplemente no
+  /// se muestra el indicador. No merece un mensaje de error.
+  Future<void> _contarNoLeidas() async {
+    try {
+      final bandeja = await context.servicios.notificaciones.obtenerBandeja();
+      if (!mounted) return;
+      setState(() => _noLeidas = bandeja.noLeidas);
+    } on ExcepcionApi {
+      // Silencio deliberado.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -53,7 +70,10 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     _buscarCtrl = TextEditingController();
     // Se difiere al primer frame: la carga necesita el contexto heredado del
     // que cuelgan las dependencias, y `initState` todavía no puede leerlo.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _cargar());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cargar();
+      _contarNoLeidas();
+    });
   }
 
   @override
@@ -125,6 +145,70 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   bool get _filtroSinResultados =>
       _todas.isNotEmpty && _filtro.trim().isNotEmpty;
 
+  /// Abandona la comunidad por voluntad propia.
+  ///
+  /// El servidor rechaza la salida si eres el administrador y quedan otros
+  /// vecinos: la comunidad se quedaría sin nadie que apruebe solicitudes. Ese
+  /// mensaje se muestra tal cual, porque explica el motivo mejor que uno
+  /// genérico.
+  Future<void> _salirDeComunidad() async {
+    final comunidad = context.sesion.perfil?.comunidad?.nombre ?? 'tu comunidad';
+
+    final confirmado = await DialogoConfirmacion.mostrar(
+      context,
+      titulo: '¿Salir de la comunidad?',
+      mensaje:
+          'Dejarás de ver y emitir alertas de $comunidad. Para volver tendrás '
+          'que solicitar el ingreso y esperar la aprobación del administrador.',
+      detalle: 'Las alertas que ya emitiste seguirán en el muro.',
+      textoConfirmar: 'Sí, salir',
+      icono: Icons.exit_to_app,
+    );
+
+    if (!confirmado || !mounted) return;
+
+    try {
+      final mensaje = await context.servicios.comunidades.salirDeComunidad();
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(mensaje)));
+
+      // Refresca el perfil: pasa a SIN_COMUNIDAD y la guardia del enrutador
+      // lleva sola a elegir comunidad.
+      await context.servicios.usuarios.obtenerPerfil();
+    } on ExcepcionApi catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.mensaje)));
+    }
+  }
+
+  /// Cierra la sesión, con confirmación previa.
+  ///
+  /// Se confirma porque volver a entrar exige la contraseña, y en una app de
+  /// emergencias quedarse fuera por un toque accidental tiene coste real.
+  Future<void> _cerrarSesion() async {
+    final confirmado = await DialogoConfirmacion.mostrar(
+      context,
+      titulo: '¿Cerrar sesión?',
+      mensaje:
+          'Dejarás de recibir alertas de tu comunidad en este teléfono hasta '
+          'que vuelvas a ingresar.',
+      textoConfirmar: 'Cerrar sesión',
+      icono: Icons.logout,
+    );
+
+    if (!confirmado || !mounted) return;
+
+    // `Sesion.cerrar` borra el token del almacén seguro y notifica; la guardia
+    // del enrutador lleva al ingreso sola. El servicio de push se da de baja
+    // desde `main.dart`, que escucha el mismo cambio de sesión.
+    await context.sesion.cerrar();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -137,17 +221,28 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       appBar: AppBar(
         title: Text(comunidad ?? 'Alertas de mi comunidad'),
         actions: [
-          if (context.sesion.perfil?.esAdmin ?? false)
-            IconButton(
-              onPressed: () => context.push(Rutas.solicitudes),
-              icon: const Icon(Icons.group_add_outlined),
-              tooltip: 'Solicitudes para unirse',
-              iconSize: t.tamano.iconoGrande,
-              constraints: BoxConstraints(
-                minWidth: t.tamano.areaTactilMinima,
-                minHeight: t.tamano.areaTactilMinima,
-              ),
+          // Notificaciones, con contador de no leídas.
+          IconButton(
+            onPressed: () async {
+              await context.push(Rutas.notificaciones);
+              if (mounted) _contarNoLeidas();
+            },
+            icon: Badge(
+              isLabelVisible: _noLeidas > 0,
+              label: Text('$_noLeidas'),
+              backgroundColor: t.color.peligroRelleno,
+              textColor: t.color.onPeligroRelleno,
+              child: const Icon(Icons.notifications_outlined),
             ),
+            tooltip: _noLeidas > 0
+                ? 'Notificaciones, $_noLeidas sin leer'
+                : 'Notificaciones',
+            iconSize: t.tamano.iconoGrande,
+            constraints: BoxConstraints(
+              minWidth: t.tamano.areaTactilMinima,
+              minHeight: t.tamano.areaTactilMinima,
+            ),
+          ),
           IconButton(
             onPressed: _refrescando ? null : () => _cargar(esRefresco: true),
             icon: const Icon(Icons.refresh),
@@ -159,6 +254,16 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
               minWidth: t.tamano.areaTactilMinima,
               minHeight: t.tamano.areaTactilMinima,
             ),
+          ),
+          // Menú: agrupa lo que no cabe en la barra. Con cuatro iconos sueltos
+          // el título de la comunidad quedaba sin espacio.
+          _MenuVecino(
+            onPerfil: () => context.push(Rutas.perfil),
+            onMiembros: () => context.push(Rutas.miembros),
+            onSalirComunidad: _salirDeComunidad,
+            onSolicitudes: () => context.push(Rutas.solicitudes),
+            onPanico: () => context.push(Rutas.ajustesPanico),
+            onCerrarSesion: _cerrarSesion,
           ),
         ],
       ),
@@ -285,8 +390,10 @@ class _ListaAlertas extends StatelessWidget {
             tipoAlerta: alerta.tipoAlerta,
             nombreVecino: alerta.nombreVecino,
             fechaHora: alerta.fechaHora,
-            // La categoría y la urgencia las deduce el propio componente a
-            // partir del texto libre que envía el backend.
+            // El pánico es autoritativo: se fuerza la categoría en lugar de
+            // dejar que se deduzca del texto libre. Sin esto, una alerta de
+            // emergencia real se mostraba como urgencia media.
+            categoria: alerta.esPanico ? CategoriaAlerta.panico : null,
             onTap: () => _mostrarDetalle(context, alerta),
             accionFinal: const _IndicadorDetalle(),
           );
@@ -326,6 +433,130 @@ class _IndicadorDetalle extends StatelessWidget {
         size: context.escalarAdorno(t.tamano.iconoGrande),
         color: t.color.onSuperficieSutil,
       ),
+    );
+  }
+}
+
+/// Menú del vecino en la barra superior.
+///
+/// Agrupa las acciones secundarias: sin él, la barra tenía cuatro iconos y el
+/// nombre de la comunidad se truncaba en pantallas estrechas.
+class _MenuVecino extends StatelessWidget {
+  const _MenuVecino({
+    required this.onPerfil,
+    required this.onMiembros,
+    required this.onSalirComunidad,
+    required this.onSolicitudes,
+    required this.onPanico,
+    required this.onCerrarSesion,
+  });
+
+  final VoidCallback onPerfil;
+  final VoidCallback onMiembros;
+  final VoidCallback onSalirComunidad;
+  final VoidCallback onSolicitudes;
+  final VoidCallback onPanico;
+  final VoidCallback onCerrarSesion;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final perfil = context.sesion.perfil;
+    final esAdmin = perfil?.esAdmin ?? false;
+
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      tooltip: 'Más opciones',
+      iconSize: t.tamano.iconoGrande,
+      onSelected: (opcion) {
+        switch (opcion) {
+          case 'perfil':
+            onPerfil();
+          case 'miembros':
+            onMiembros();
+          case 'salir_comunidad':
+            onSalirComunidad();
+          case 'solicitudes':
+            onSolicitudes();
+          case 'panico':
+            onPanico();
+          case 'salir':
+            onCerrarSesion();
+        }
+      },
+      itemBuilder: (context) => [
+        // Cabecera: quién eres y en qué comunidad estás. Es pulsable y lleva al
+        // perfil, que es donde se espera encontrarlo.
+        PopupMenuItem<String>(
+          value: 'perfil',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                perfil?.nombre ?? 'Vecino',
+                style: context.textos.titleSmall,
+              ),
+              SizedBox(height: t.espacio.microEntreTexto),
+              Text(
+                esAdmin
+                    ? 'Administrador · ${perfil?.comunidad?.codigo ?? ""}'
+                    : 'Vecino · ${perfil?.comunidad?.codigo ?? ""}',
+                style: context.textos.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        // Ver vecinos: disponible para todos los miembros, no solo el admin.
+        const PopupMenuItem<String>(
+          value: 'miembros',
+          child: ListTile(
+            leading: Icon(Icons.groups_outlined),
+            title: Text('Vecinos de mi comunidad'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        if (esAdmin)
+          const PopupMenuItem<String>(
+            value: 'solicitudes',
+            child: ListTile(
+              leading: Icon(Icons.group_add_outlined),
+              title: Text('Solicitudes para unirse'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        const PopupMenuItem<String>(
+          value: 'panico',
+          child: ListTile(
+            leading: Icon(Icons.emergency_outlined),
+            title: Text('Botón de pánico'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'salir_comunidad',
+          child: ListTile(
+            leading: Icon(Icons.exit_to_app, color: t.color.advertencia),
+            title: Text(
+              'Salir de la comunidad',
+              style: TextStyle(color: t.color.advertencia),
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'salir',
+          child: ListTile(
+            leading: Icon(Icons.logout, color: t.color.peligro),
+            title: Text(
+              'Cerrar sesión',
+              style: TextStyle(color: t.color.peligro),
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -9,12 +9,24 @@ class Alerta {
     required this.fechaHora,
     required this.estado,
     required this.nombreVecino,
+    this.esPanico = false,
+    this.descripcion,
   });
 
   final int idAlerta;
   final String tipoAlerta;
   final DateTime fechaHora;
   final String estado;
+
+  /// Emitida por el gesto de pánico, sin que el vecino eligiera el tipo.
+  ///
+  /// Es **autoritativo**: prevalece sobre cualquier deducción a partir del
+  /// texto. Sin este campo, una alerta de pánico caía en la categoría genérica
+  /// y se mostraba como urgencia media — la alerta más grave del sistema
+  /// apareciendo como la menos alarmante.
+  final bool esPanico;
+
+  final String? descripcion;
 
   /// Viene anidado en `usuario.nombre` gracias al eager loading del backend.
   final String nombreVecino;
@@ -38,6 +50,10 @@ class Alerta {
           DateTime.now(),
       estado: json['estado'] as String? ?? 'Desconocido',
       nombreVecino: (usuario?['nombre'] as String?) ?? 'Vecino anónimo',
+      esPanico: json['es_panico'] as bool? ?? false,
+      descripcion: (json['descripcion'] as String?)?.trim().isNotEmpty == true
+          ? (json['descripcion'] as String).trim()
+          : null,
     );
   }
 }

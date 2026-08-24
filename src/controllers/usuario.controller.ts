@@ -72,6 +72,62 @@ export const perfilController = async (req: AuthRequest, res: Response): Promise
 };
 
 /**
+ * PATCH /api/usuarios/yo — actualizar nombre y/o teléfono.
+ */
+export const actualizarPerfilController = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { nombre, telefono } = req.body ?? {};
+
+        const perfil = await usuarioService.actualizarPerfil(req.user!.id_usuario, {
+            nombre: typeof nombre === 'string' ? nombre : undefined,
+            telefono: typeof telefono === 'string' ? telefono : undefined,
+        });
+
+        res.status(200).json({ mensaje: 'Perfil actualizado.', perfil });
+    } catch (error) {
+        if (error instanceof ConflictoDatos) {
+            res.status(409).json({ mensaje: error.message });
+            return;
+        }
+        console.error('[actualizarPerfil]', error);
+        res.status(500).json({ mensaje: 'No pudimos actualizar tu perfil.' });
+    }
+};
+
+/**
+ * PATCH /api/usuarios/password — cambiar la contraseña.
+ */
+export const cambiarPasswordController = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { password_actual, password_nueva } = req.body ?? {};
+
+        await usuarioService.cambiarPassword(
+            req.user!.id_usuario,
+            String(password_actual ?? ''),
+            String(password_nueva ?? '')
+        );
+
+        res.status(200).json({ mensaje: 'Contraseña actualizada.' });
+    } catch (error) {
+        if (error instanceof CredencialesInvalidas) {
+            // 400 y no 401: la sesión es válida, lo incorrecto es el dato
+            // enviado. Un 401 haría que el cliente cerrara la sesión.
+            res.status(400).json({
+                mensaje: 'La contraseña actual no es correcta.',
+                errores: [{ campo: 'password_actual', mensaje: 'No es correcta.' }],
+            });
+            return;
+        }
+        if (error instanceof ConflictoDatos) {
+            res.status(409).json({ mensaje: error.message });
+            return;
+        }
+        console.error('[cambiarPassword]', error);
+        res.status(500).json({ mensaje: 'No pudimos cambiar la contraseña.' });
+    }
+};
+
+/**
  * POST /api/usuarios/token-prueba — SOLO DESARROLLO
  *
  * ⚠️ Genera un token sin verificar contraseña. La ruta está bloqueada en

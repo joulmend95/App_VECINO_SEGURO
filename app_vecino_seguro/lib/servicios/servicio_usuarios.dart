@@ -68,6 +68,43 @@ class ServicioUsuarios {
     return perfil;
   }
 
+  /// `PATCH /api/usuarios/yo` — actualizar nombre y teléfono.
+  ///
+  /// Refresca la sesión con el perfil devuelto, para que el nombre nuevo
+  /// aparezca de inmediato en el menú y en el resto de pantallas.
+  Future<PerfilVecino> actualizarPerfil({
+    String? nombre,
+    String? telefono,
+  }) async {
+    final json = await _api.parchear(
+      '/api/usuarios/yo',
+      cuerpo: {
+        'nombre': ?nombre,
+        'telefono': ?telefono,
+      },
+    );
+
+    final perfil = PerfilVecino.desdeJson(
+      (json['perfil'] as Map<String, dynamic>?) ?? const {},
+    );
+    _sesion.actualizarPerfil(perfil);
+    return perfil;
+  }
+
+  /// `PATCH /api/usuarios/password` — cambiar la contraseña.
+  ///
+  /// Exige la actual: sin esa comprobación, alguien con acceso momentáneo al
+  /// teléfono desbloqueado podría cambiarla y dejar fuera al dueño.
+  Future<void> cambiarPassword({
+    required String actual,
+    required String nueva,
+  }) async {
+    await _api.parchear(
+      '/api/usuarios/password',
+      cuerpo: {'password_actual': actual, 'password_nueva': nueva},
+    );
+  }
+
   Future<PerfilVecino> _abrirSesion(Map<String, dynamic> json) async {
     final resultado = ResultadoAutenticacion.desdeJson(json);
 

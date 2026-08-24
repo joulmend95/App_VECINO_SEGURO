@@ -139,9 +139,18 @@ model Alerta {
   id_usuario Int
   usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario])
 
+  /// Comunidad a la que se emitió la alerta.
+  ///
+  /// Se guarda aquí y no se deduce de `usuario.id_comunidad` porque un vecino
+  /// puede salir de la comunidad —o ser expulsado— y sus alertas pasadas deben
+  /// seguir formando parte del historial. Deducirla del usuario haría que
+  /// desaparecieran del muro en cuanto se marchara.
+  id_comunidad Int?
+
   notificaciones Notificacion[]
 
   @@index([id_usuario, fecha_hora])
+  @@index([id_comunidad, fecha_hora])
 }
 
 /// 6. Notificación entregada a un vecino

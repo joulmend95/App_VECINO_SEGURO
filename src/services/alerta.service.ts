@@ -54,6 +54,9 @@ export const emitirAlerta = async (datos: EmitirAlertaInput) => {
             latitud: datos.latitud,
             longitud: datos.longitud,
             id_usuario: datos.id_usuario,
+            // La comunidad se guarda en la propia alerta: si el vecino sale o
+            // es expulsado, su historial sigue perteneciendo a la comunidad.
+            id_comunidad: datos.id_comunidad,
             estado: EstadoAlerta.ACTIVA,
         },
         include: {
@@ -96,7 +99,10 @@ export const obtenerAlertasPorComunidad = async (id_comunidad: number) => {
     // Una sola consulta con JOIN: trae las alertas y el vecino autor.
     const alertasBD = await prisma.alerta.findMany({
         where: {
-            usuario: { id_comunidad },
+            // Se filtra por el campo de la propia alerta, no por la comunidad
+            // actual del autor: así las alertas de quien ya se marchó siguen
+            // en el muro. El historial es de la comunidad, no de la persona.
+            id_comunidad,
             estado: EstadoAlerta.ACTIVA,
         },
         // El pánico primero: en una emergencia, lo urgente encabeza la lista.

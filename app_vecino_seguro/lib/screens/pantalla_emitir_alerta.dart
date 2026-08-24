@@ -131,6 +131,11 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
                     ],
 
                     SelectorCategoria(
+                      // "Emergencia" queda fuera: esa categoría es exclusiva
+                      // del gesto de pánico, nunca una elección manual.
+                      categorias: CategoriaAlerta.values
+                          .where((c) => c != CategoriaAlerta.panico)
+                          .toList(),
                       seleccionada: _categoria,
                       habilitado: !_enviando,
                       onSeleccionar: (categoria) => setState(() {
