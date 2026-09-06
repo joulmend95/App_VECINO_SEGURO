@@ -47,6 +47,12 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
   BorradorAlerta? _borrador;
   bool _restaurado = false;
 
+  /// Clave de cliente del intento en curso.
+  ///
+  /// Se conserva entre intentos fallidos para que reintentar reutilice la misma
+  /// operación en lugar de encolar una segunda. Se descarta al tener éxito.
+  String? _claveEnCurso;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -98,20 +104,54 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
     });
 
     try {
-      await context.servicios.alertas.emitir(
+      final cola = context.servicios.cola;
+
+      // Se encola SIEMPRE antes de intentar enviar. Si se enviara directo y el
+      // proceso muriera entre la petición y la respuesta, no quedaría ningún
+      // rastro de la emergencia. Encolar primero garantiza que lo peor que
+      // puede pasar es que salga más tarde.
+      //
+      // Se reutiliza la clave del intento anterior si lo hubo: sin eso, pulsar
+      // "Emitir" otra vez tras un error del servidor crearía una segunda alerta
+      // para la misma emergencia.
+      _claveEnCurso = await cola.encolarAlerta(
         tipoAlerta: categoria.nombre,
         descripcion: _descripcionCtrl.text,
+        claveExistente: _claveEnCurso,
       );
       if (!mounted) return;
 
-      // Solo ahora se descarta el borrador: la alerta ya está en el servidor.
-      // Limpiarlo antes de confirmar el 202 borraría el texto de alguien cuya
-      // emisión acabó fallando por red.
+      final resultado = await cola.drenar();
+      if (!mounted) return;
+
+      // --- Caso 3: el servidor respondió, y respondió que no --------------
+      // Se queda en la pantalla con el mensaje real. Decirle "sin conexión" a
+      // quien acaba de recibir un 429 o un 500 sería mentirle, y además le
+      // haría creer que su alerta va a salir sola cuando quizá no.
+      if (resultado.enviadas == 0 && !resultado.sinConexion) {
+        setState(
+          () => _errorGeneral =
+              resultado.ultimoError ?? 'No pudimos emitir la alerta.',
+        );
+        return;
+      }
+
+      // --- Casos 1 y 2: la alerta está a salvo ----------------------------
+      // Enviada, o guardada en la cola por falta de red. En ambos el vecino ya
+      // no tiene que reescribir nada, así que el borrador se descarta.
       _borrador?.limpiar();
+      _claveEnCurso = null;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Alerta emitida. Tu comunidad ya fue notificada.')),
+        SnackBar(
+          content: Text(
+            resultado.enviadas > 0
+                ? 'Alerta emitida. Tu comunidad ya fue notificada.'
+                : 'Sin conexión. Tu alerta se enviará en cuanto vuelva la red.',
+          ),
+        ),
       );
+
       // Vuelve al muro, que se refresca al recibir el control.
       //
       // `maybePop` y no `context.pop()`: si esta pantalla fuese la raíz de la

@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../servicios/cliente_api.dart';
-import '../servicios/cola_panico.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';
@@ -90,27 +88,29 @@ class _PantallaCuentaAtrasState extends State<PantallaCuentaAtras> {
 
     final servicios = context.servicios;
 
-    try {
-      await servicios.alertas.emitir(esPanico: true);
-      if (!mounted) return;
-      setState(() {
-        _enviando = false;
+    // Se encola SIEMPRE antes de intentar enviar. Si se enviara directo y el
+    // proceso muriera entre la petición y la respuesta, no quedaría rastro de
+    // la emergencia. La clave de cliente hace que reintentarla no la duplique.
+    await servicios.cola.encolarAlerta(esPanico: true);
+    if (!mounted) return;
+
+    // Un solo intento inmediato. Lo que no salga ahora queda en la cola y se
+    // reenvía en cuanto vuelva la red.
+    final resultado = await servicios.cola.drenar();
+    if (!mounted) return;
+
+    setState(() {
+      _enviando = false;
+      if (resultado.enviadas > 0) {
         _enviada = true;
-      });
-    } on ExcepcionApi catch (e) {
-      if (!mounted) return;
-
-      // Sin red: se encola para reintentar. La petición de auxilio no se pierde.
-      await ColaPanico(
-        alertas: servicios.alertas,
-      ).encolar(PanicoPendiente(momento: DateTime.now()));
-
-      if (!mounted) return;
-      setState(() {
-        _enviando = false;
-        _error = e.mensaje;
-      });
-    }
+      } else {
+        // La alerta NO se ha perdido: sigue en la cola. El mensaje lo dice, para
+        // que el vecino no crea que tiene que repetir el gesto.
+        _error =
+            'Sin conexión. Tu alerta quedó guardada y se enviará en cuanto '
+            'vuelva la red.';
+      }
+    });
   }
 
   @override

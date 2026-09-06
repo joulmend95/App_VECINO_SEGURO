@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:app_vecino_seguro/modelos/perfil_vecino.dart';
 import 'package:app_vecino_seguro/navegacion/rutas.dart';
+import 'package:app_vecino_seguro/servicios/almacen_local.dart';
 import 'package:app_vecino_seguro/servicios/almacen_seguro.dart';
+import 'package:app_vecino_seguro/servicios/detector_conexion.dart';
 import 'package:app_vecino_seguro/servicios/cliente_api.dart';
 import 'package:app_vecino_seguro/servicios/dependencias.dart';
 import 'package:app_vecino_seguro/servicios/sesion.dart';
@@ -164,17 +167,23 @@ Future<Sesion> sesionActiva({bool esAdmin = false}) async {
   return sesion;
 }
 
-/// Monta la aplicación **con el enrutador real**, para probar las guardias.
+/// Contenedor de servicios con TODO lo nativo sustituido por dobles.
 ///
-/// A diferencia de [montarConDependencias], que monta una pantalla suelta,
-/// aquí se ejercita `construirEnrutador` de verdad: redirecciones, rutas
-/// anidadas y parámetros de ruta. Devuelve el `GoRouter` para poder consultar
-/// la dirección actual y navegar desde la prueba.
-({Widget app, GoRouter enrutador}) montarAppConEnrutador({
+/// `AlmacenLocalSqflite` y `DetectorConexionReal` necesitan binarios y canales
+/// de plataforma que no existen en `flutter test`. Construir `Servicios` por
+/// aquí es lo que permite probar los escenarios sin conexión de verdad, en vez
+/// de comprobar solo que la app degrada en silencio.
+Servicios serviciosDePrueba({
   required Sesion sesion,
   required MockClient cliente,
-  String? rutaInicial,
+  AlmacenLocal? local,
+  DetectorConexion? detector,
 }) {
+  // Sin esto, el canal de `shared_preferences` no existe y `getInstance()` se
+  // queda esperando para siempre. Cerrar sesión llama a `prefs.clear()`, así
+  // que cualquier prueba que reciba un 401 se colgaría.
+  SharedPreferences.setMockInitialValues({});
+
   final servicios = Servicios(
     sesion: sesion,
     cliente: ClienteApi(
@@ -182,6 +191,31 @@ Future<Sesion> sesionActiva({bool esAdmin = false}) async {
       cliente: cliente,
       urlBase: 'http://servidor-falso',
     ),
+    almacenLocal: local ?? AlmacenLocalEnMemoria(),
+    detector: detector ?? DetectorConexionFalso(),
+  );
+  sesion.alCerrarSesion = servicios.borrarDatosLocales;
+  return servicios;
+}
+
+/// Monta la aplicación **con el enrutador real**, para probar las guardias.
+///
+/// A diferencia de [montarConDependencias], que monta una pantalla suelta,
+/// aquí se ejercita `construirEnrutador` de verdad: redirecciones, rutas
+/// anidadas y parámetros de ruta. Devuelve el `GoRouter` para poder consultar
+/// la dirección actual y navegar desde la prueba.
+({Widget app, GoRouter enrutador, Servicios servicios}) montarAppConEnrutador({
+  required Sesion sesion,
+  required MockClient cliente,
+  String? rutaInicial,
+  AlmacenLocal? local,
+  DetectorConexion? detector,
+}) {
+  final servicios = serviciosDePrueba(
+    sesion: sesion,
+    cliente: cliente,
+    local: local,
+    detector: detector,
   );
 
   final enrutador = construirEnrutador(sesion);
@@ -201,6 +235,7 @@ Future<Sesion> sesionActiva({bool esAdmin = false}) async {
       ),
     ),
     enrutador: enrutador,
+    servicios: servicios,
   );
 }
 
@@ -216,14 +251,14 @@ Widget montarConDependencias({
   Size? tamano,
   double escalaTexto = 1.0,
   bool oscuro = false,
+  AlmacenLocal? local,
+  DetectorConexion? detector,
 }) {
-  final servicios = Servicios(
+  final servicios = serviciosDePrueba(
     sesion: sesion,
-    cliente: ClienteApi(
-      sesion: sesion,
-      cliente: cliente,
-      urlBase: 'http://servidor-falso',
-    ),
+    cliente: cliente,
+    local: local,
+    detector: detector,
   );
 
   return Dependencias(

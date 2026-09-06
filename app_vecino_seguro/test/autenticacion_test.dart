@@ -92,7 +92,7 @@ void main() {
   group('P3 Ingreso', () {
     Future<Sesion> montar(WidgetTester tester, MockClient cliente) async {
       final sesion = sesionDePrueba();
-      await sesion.restaurarToken();
+      await sesion.restaurarSesion();
       await tester.pumpWidget(
         montarConDependencias(
           hijo: const PantallaIngreso(),
@@ -219,7 +219,7 @@ void main() {
 
     testWidgets('un registro correcto deja la sesión abierta', (tester) async {
       final sesion = sesionDePrueba();
-      await sesion.restaurarToken();
+      await sesion.restaurarSesion();
 
       await tester.pumpWidget(
         montarConDependencias(

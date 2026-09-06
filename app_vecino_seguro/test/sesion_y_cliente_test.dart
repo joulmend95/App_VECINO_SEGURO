@@ -28,7 +28,7 @@ void main() {
 
     test('sin token guardado pasa a "sinSesion"', () async {
       final sesion = sesionDePrueba();
-      final token = await sesion.restaurarToken();
+      final token = await sesion.restaurarSesion();
 
       expect(token, isNull);
       expect(sesion.fase, FaseSesion.sinSesion);
@@ -36,7 +36,7 @@ void main() {
 
     test('restaura el token guardado de una sesión anterior', () async {
       final sesion = sesionDePrueba(tokenGuardado: 'jwt-persistido');
-      final token = await sesion.restaurarToken();
+      final token = await sesion.restaurarSesion();
 
       expect(token, 'jwt-persistido');
       // Sigue en "iniciando": el token existe pero aún no se validó contra el
@@ -60,7 +60,7 @@ void main() {
     test('cerrar sesión borra la credencial del almacén', () async {
       final almacen = AlmacenEnMemoria({'vecino_seguro.token': 'jwt'});
       final sesion = Sesion(almacen: almacen);
-      await sesion.restaurarToken();
+      await sesion.restaurarSesion();
 
       await sesion.cerrar();
 

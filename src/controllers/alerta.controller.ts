@@ -14,7 +14,7 @@ import * as alertaService from '../services/alerta.service';
  */
 export const emitirAlertaController = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { tipo_alerta, descripcion, es_panico, latitud, longitud } = req.body;
+        const { tipo_alerta, descripcion, es_panico, latitud, longitud, clave_cliente } = req.body;
 
         const esPanico = es_panico === true;
 
@@ -27,7 +27,7 @@ export const emitirAlertaController = async (req: AuthRequest, res: Response): P
 
         const { id_usuario, id_comunidad } = req.user!;
 
-        const nuevaAlerta = await alertaService.emitirAlerta({
+        const { alerta, yaExistia } = await alertaService.emitirAlerta({
             tipo_alerta: esPanico ? 'Emergencia (botón de pánico)' : String(tipo_alerta).trim(),
             descripcion: descripcion ? String(descripcion).trim() : null,
             es_panico: esPanico,
@@ -35,13 +35,25 @@ export const emitirAlertaController = async (req: AuthRequest, res: Response): P
             longitud: typeof longitud === 'number' ? longitud : null,
             id_usuario,
             id_comunidad: id_comunidad!,
+            clave_cliente:
+                typeof clave_cliente === 'string' && clave_cliente.trim() !== ''
+                    ? clave_cliente.trim()
+                    : null,
         });
 
-        res.status(202).json({
-            mensaje: esPanico
-                ? '¡Alerta de emergencia enviada! Notificando a tu comunidad.'
-                : 'Alerta emitida. Notificando a tu comunidad en segundo plano.',
-            alerta: nuevaAlerta,
+        // 200 y no 202 cuando la clave ya estaba registrada. Ninguno de los dos
+        // es un error: le dice al teléfono "esto ya lo recibí, bórralo de tu
+        // cola y no lo cuentes como un aviso nuevo". Sin esa distinción, un
+        // reintento se vería igual que una emisión y la app anunciaría dos veces
+        // la misma emergencia.
+        res.status(yaExistia ? 200 : 202).json({
+            mensaje: yaExistia
+                ? 'Esta alerta ya había sido recibida.'
+                : esPanico
+                  ? '¡Alerta de emergencia enviada! Notificando a tu comunidad.'
+                  : 'Alerta emitida. Notificando a tu comunidad en segundo plano.',
+            alerta,
+            ya_existia: yaExistia,
         });
     } catch (error: any) {
         if (error?.name === 'DemasiadasAlertas') {

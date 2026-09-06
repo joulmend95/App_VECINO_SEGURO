@@ -64,7 +64,7 @@ class ServicioUsuarios {
   Future<PerfilVecino> obtenerPerfil() async {
     final json = await _api.obtener('/api/usuarios/yo');
     final perfil = PerfilVecino.desdeJson(json);
-    _sesion.actualizarPerfil(perfil);
+    await _sesion.actualizarPerfil(perfil);
     return perfil;
   }
 
@@ -87,7 +87,7 @@ class ServicioUsuarios {
     final perfil = PerfilVecino.desdeJson(
       (json['perfil'] as Map<String, dynamic>?) ?? const {},
     );
-    _sesion.actualizarPerfil(perfil);
+    await _sesion.actualizarPerfil(perfil);
     return perfil;
   }
 

@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../modelos/alerta.dart';
 import '../navegacion/rutas.dart';
+import '../servicios/almacen_local.dart';
+import '../servicios/cola_sincronizacion.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/dependencias.dart';
 import '../servicios/servicio_alertas.dart';
@@ -51,6 +53,16 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   /// Notificaciones sin leer, para el indicador de la barra superior.
   int _noLeidas = 0;
 
+  /// Cuánto hace que se guardaron estos datos. `null` ⇒ vienen del servidor.
+  ///
+  /// Es lo que decide si se muestra el aviso de datos desactualizados. Que sea
+  /// nulo cuando son frescos, y no un `bool` aparte, evita el estado imposible
+  /// de "datos frescos con antigüedad de 20 minutos".
+  Duration? _antiguedad;
+
+  /// Alertas escritas sin conexión que todavía no llegaron al servidor.
+  List<OperacionPendiente> _pendientes = const [];
+
   /// Consulta el contador sin bloquear la pantalla: si falla, simplemente no
   /// se muestra el indicador. No merece un mensaje de error.
   Future<void> _contarNoLeidas() async {
@@ -73,7 +85,26 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _cargar();
       _contarNoLeidas();
+      _escucharCola();
     });
+  }
+
+  ColaSincronizacion? _cola;
+
+  /// Recarga el muro cuando la cola consigue enviar lo que tenía pendiente.
+  ///
+  /// Sin esto, al volver la red la alerta salía de verdad pero la pantalla
+  /// seguía anunciando «1 alerta pendiente de envío» hasta que el vecino
+  /// refrescaba a mano — justo el momento en que menos ganas tiene de dudar de
+  /// si su aviso salió o no.
+  void _escucharCola() {
+    if (_apiInyectada != null) return; // Pantalla montada suelta en pruebas.
+    _cola = context.servicios.cola..addListener(_alCambiarLaCola);
+  }
+
+  void _alCambiarLaCola() {
+    if (!mounted) return;
+    _cargar(esRefresco: true);
   }
 
   @override
@@ -83,6 +114,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     //
     // El cliente HTTP NO se cierra aquí: es compartido por toda la app y lo
     // gestiona el contenedor de dependencias.
+    _cola?.removeListener(_alCambiarLaCola);
     _buscarCtrl.dispose();
     super.dispose();
   }
@@ -95,6 +127,12 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       final respuesta = await _api.obtenerAlertasComunidad();
       if (!mounted) return;
       _todas = respuesta.alertas;
+      // `esLocal` significa que el servidor no respondió y esto salió de la
+      // base del teléfono. El vecino tiene derecho a saberlo antes de decidir
+      // que "no ha pasado nada en el barrio".
+      _antiguedad = respuesta.antiguedad;
+      await _leerPendientes();
+      if (!mounted) return;
       setState(() {
         _estado = _calcularEstado();
         _refrescando = false;
@@ -105,6 +143,17 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
         _estado = VistaError(e.mensaje);
         _refrescando = false;
       });
+    }
+  }
+
+  /// Lee la cola local. Falla en silencio: no poder mostrar los pendientes no
+  /// justifica romper el muro.
+  Future<void> _leerPendientes() async {
+    if (_apiInyectada != null) return; // Pantalla montada suelta en pruebas.
+    try {
+      _pendientes = await context.servicios.cola.pendientes();
+    } catch (_) {
+      _pendientes = const [];
     }
   }
 
@@ -191,21 +240,33 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   /// Se confirma porque volver a entrar exige la contraseña, y en una app de
   /// emergencias quedarse fuera por un toque accidental tiene coste real.
   Future<void> _cerrarSesion() async {
+    // Cerrar sesión borra el almacén local entero, y eso incluye las alertas
+    // que todavía no salieron del teléfono. Destruir una petición de auxilio en
+    // silencio no es aceptable: si las hay, se dice antes de preguntar.
+    final pendientes = _pendientes.length;
+
     final confirmado = await DialogoConfirmacion.mostrar(
       context,
       titulo: '¿Cerrar sesión?',
       mensaje:
           'Dejarás de recibir alertas de tu comunidad en este teléfono hasta '
           'que vuelvas a ingresar.',
+      detalle: pendientes > 0
+          ? 'Tienes $pendientes ${pendientes == 1 ? "alerta" : "alertas"} sin '
+                'enviar. Se perderán: conéctate antes para que salgan.'
+          : 'Se borrarán del teléfono las alertas guardadas y tus datos de '
+                'perfil. Se volverán a descargar al ingresar.',
+      esDestructiva: pendientes > 0,
       textoConfirmar: 'Cerrar sesión',
       icono: Icons.logout,
     );
 
     if (!confirmado || !mounted) return;
 
-    // `Sesion.cerrar` borra el token del almacén seguro y notifica; la guardia
-    // del enrutador lleva al ingreso sola. El servicio de push se da de baja
-    // desde `main.dart`, que escucha el mismo cambio de sesión.
+    // `Sesion.cerrar` vacía el almacén cifrado y delega en `Servicios` el
+    // borrado de la base local, el borrador y las preferencias; después notifica
+    // y la guardia del enrutador lleva al ingreso sola. El servicio de push se
+    // da de baja desde `main.dart`, que escucha el mismo cambio de sesión.
     await context.sesion.cerrar();
   }
 
@@ -270,6 +331,16 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       body: SafeArea(
         child: Column(
           children: [
+            // --- Aviso de datos guardados ---
+            // Va ARRIBA del todo, antes del buscador: si el vecino está viendo
+            // una foto de hace veinte minutos tiene que saberlo antes de
+            // concluir que en su barrio no ha pasado nada.
+            if (_antiguedad != null)
+              _AvisoSinConexion(
+                antiguedad: _antiguedad!,
+                pendientes: _pendientes.length,
+              ),
+
             // --- Buscador (componente del catálogo) ---
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -402,6 +473,74 @@ class _ListaAlertas extends StatelessWidget {
             accionFinal: const _IndicadorDetalle(),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Aviso de que lo que se ve salió de la base local, no del servidor.
+///
+/// **Por qué el texto dice la antigüedad y no solo "sin conexión".** En una app
+/// de seguridad vecinal, un muro vacío se interpreta como "no ha pasado nada".
+/// Sin la antigüedad, un vecino podría estar viendo una foto de hace media hora
+/// y creerla actual. La cifra es lo que le permite decidir si fiarse.
+class _AvisoSinConexion extends StatelessWidget {
+  const _AvisoSinConexion({required this.antiguedad, this.pendientes = 0});
+
+  final Duration antiguedad;
+
+  /// Alertas propias que aún no salieron del teléfono.
+  final int pendientes;
+
+  static String _describir(Duration d) {
+    if (d.inMinutes < 1) return 'hace unos segundos';
+    if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
+    if (d.inHours < 24) return 'hace ${d.inHours} h';
+    return 'hace ${d.inDays} d';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    final texto = pendientes > 0
+        ? 'Sin conexión · datos guardados ${_describir(antiguedad)} · '
+              '$pendientes ${pendientes == 1 ? "alerta pendiente" : "alertas pendientes"} de envío'
+        : 'Sin conexión · datos guardados ${_describir(antiguedad)}';
+
+    return Semantics(
+      // Región en vivo: el lector de pantalla lo anuncia en cuanto aparece, sin
+      // que haya que ir a buscarlo.
+      liveRegion: true,
+      container: true,
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: t.espacio.margenPantalla,
+          vertical: t.espacio.entreGrupos,
+        ),
+        color: t.color.advertenciaSuave,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.cloud_off_outlined,
+                size: context.escalarAdorno(t.tamano.iconoMedio),
+                color: t.color.onAdvertenciaSuave,
+              ),
+            ),
+            SizedBox(width: t.espacio.entreElementos),
+            Expanded(
+              child: Text(
+                texto,
+                style: context.textos.bodySmall?.copyWith(
+                  color: t.color.onAdvertenciaSuave,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

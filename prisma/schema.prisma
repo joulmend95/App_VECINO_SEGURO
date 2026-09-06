@@ -136,6 +136,17 @@ model Alerta {
   latitud  Float?
   longitud Float?
 
+  /// Identificador que genera el teléfono ANTES de enviar la alerta.
+  ///
+  /// Hace seguro el reintento de la cola sin conexión: si la petición llegó al
+  /// servidor pero la respuesta se perdió por el camino, el reintento trae la
+  /// misma clave y se devuelve la alerta ya creada en lugar de crear otra. Sin
+  /// esto, una mala conexión convierte una emergencia en tres.
+  ///
+  /// Nullable a propósito: las alertas anteriores a esta migración no la tienen,
+  /// y un cliente que no la envíe sigue funcionando.
+  clave_cliente String? @unique
+
   id_usuario Int
   usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario])
 

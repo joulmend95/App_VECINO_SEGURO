@@ -18,6 +18,16 @@ enum EstadoMembresia {
     'PENDIENTE' => EstadoMembresia.pendiente,
     _ => EstadoMembresia.sinComunidad,
   };
+
+  /// Inverso de [desdeApi], para volver a guardar el perfil en caché.
+  ///
+  /// Sin esto, el perfil guardado se releería siempre como `sinComunidad` y la
+  /// app arrancaría mandando a elegir comunidad a un vecino que ya tiene una.
+  String get aApi => switch (this) {
+    EstadoMembresia.activo => 'ACTIVO',
+    EstadoMembresia.pendiente => 'PENDIENTE',
+    EstadoMembresia.sinComunidad => 'SIN_COMUNIDAD',
+  };
 }
 
 /// Comunidad a la que pertenece el vecino.
@@ -46,6 +56,13 @@ class ComunidadDelVecino {
       esAdmin: json['es_admin'] as bool? ?? false,
     );
   }
+
+  Map<String, dynamic> aJson() => {
+    'id_comunidad': idComunidad,
+    'nombre': nombre,
+    'codigo': codigo,
+    'es_admin': esAdmin,
+  };
 }
 
 /// Solicitud de ingreso pendiente de resolución.
@@ -69,6 +86,12 @@ class SolicitudPendiente {
           DateTime.now(),
     );
   }
+
+  Map<String, dynamic> aJson() => {
+    'id_solicitud': idSolicitud,
+    'comunidad': comunidad,
+    'fecha_solicitud': fechaSolicitud.toUtc().toIso8601String(),
+  };
 }
 
 /// Perfil del vecino autenticado.
@@ -114,6 +137,23 @@ class PerfilVecino {
           : null,
     );
   }
+
+  /// Serializa el perfil para guardarlo en el almacén cifrado.
+  ///
+  /// Produce **exactamente la misma forma** que devuelve `GET /api/usuarios/yo`,
+  /// para que [desdeJson] pueda releerlo sin ninguna rama especial. Un formato
+  /// propio obligaría a mantener dos deserializadores que tienen que coincidir.
+  ///
+  /// Contiene nombre y teléfono: es dato personal, y por eso se guarda cifrado
+  /// y se borra al cerrar sesión.
+  Map<String, dynamic> aJson() => {
+    'id_usuario': idUsuario,
+    'nombre': nombre,
+    'telefono': telefono,
+    'estado_membresia': estadoMembresia.aApi,
+    'comunidad': comunidad?.aJson(),
+    'solicitud_pendiente': solicitudPendiente?.aJson(),
+  };
 }
 
 /// Atajo de legibilidad para las guardias y el gesto de pánico.

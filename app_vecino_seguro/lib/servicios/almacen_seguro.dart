@@ -9,6 +9,18 @@ abstract interface class AlmacenSeguro {
   Future<String?> leer(String clave);
   Future<void> escribir(String clave, String valor);
   Future<void> borrar(String clave);
+
+  /// Borra **todo** lo guardado por la aplicación.
+  ///
+  /// Existe porque borrar por clave no basta: obliga a que quien cierra la
+  /// sesión conozca de antemano cada clave que alguien haya podido añadir. Ese
+  /// fue exactamente el origen de un fallo real — la cola de pánico sobrevivía
+  /// al cierre de sesión y se reenviaba con la cuenta del siguiente vecino que
+  /// ingresara en el mismo teléfono.
+  ///
+  /// Con esto, la regla pasa a ser "al cerrar sesión no queda nada", que no
+  /// depende de recordar nada.
+  Future<void> borrarTodo();
 }
 
 /// Implementación real: Keystore en Android, Keychain en iOS.
@@ -34,6 +46,9 @@ class AlmacenSeguroReal implements AlmacenSeguro {
 
   @override
   Future<void> borrar(String clave) => _almacen.delete(key: clave);
+
+  @override
+  Future<void> borrarTodo() => _almacen.deleteAll();
 }
 
 /// Implementación en memoria, para pruebas.
@@ -51,4 +66,11 @@ class AlmacenEnMemoria implements AlmacenSeguro {
 
   @override
   Future<void> borrar(String clave) async => _datos.remove(clave);
+
+  @override
+  Future<void> borrarTodo() async => _datos.clear();
+
+  /// Claves guardadas ahora mismo. Solo para pruebas: permite comprobar que al
+  /// cerrar sesión no queda nada, sin tener que enumerar las claves a mano.
+  Iterable<String> get claves => _datos.keys;
 }

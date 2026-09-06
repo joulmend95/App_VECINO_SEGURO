@@ -10,7 +10,7 @@ import 'modelos/perfil_vecino.dart';
 import 'navegacion/rutas.dart';
 import 'servicios/dependencias.dart';
 import 'screens/pantalla_cuenta_atras.dart';
-import 'servicios/cola_panico.dart';
+import 'servicios/detector_conexion.dart';
 import 'servicios/push.dart';
 import 'servicios/sesion.dart';
 import 'theme/tema_app.dart';
@@ -55,7 +55,8 @@ class VecinoSeguroApp extends StatefulWidget {
   State<VecinoSeguroApp> createState() => _VecinoSeguroAppState();
 }
 
-class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
+class _VecinoSeguroAppState extends State<VecinoSeguroApp>
+    with WidgetsBindingObserver {
   late final Sesion _sesion;
   late final Servicios _servicios;
   late final GoRouter _enrutador;
@@ -67,8 +68,17 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
     // Una sola sesión y un solo cliente HTTP para toda la app. Si cada pantalla
     // creara los suyos, cada una tendría su propio token y el cierre automático
     // ante un 401 solo afectaría a una.
+    //
+    // `alCerrar` es lo que hace que cerrar sesión borre TODO: `Sesion` vacía el
+    // almacén cifrado y delega en `Servicios` la base local, el borrador y las
+    // preferencias, que no conoce.
     _sesion = Sesion();
     _servicios = Servicios(sesion: _sesion);
+    _sesion.alCerrarSesion = _servicios.borrarDatosLocales;
+
+    // Abre la base de datos del dispositivo. Hasta que termine, el muro no
+    // puede servir su caché; por eso se lanza cuanto antes.
+    _servicios.iniciar();
 
     // El enrutador escucha la sesión: iniciar sesión, cerrarla o ser aprobado
     // por el administrador redirigen solos.
@@ -84,10 +94,32 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
     // comunidad pertenece el vecino, la alerta no tendría destinatarios.
     _servicios.panico.escuchar();
     _gestos = _servicios.panico.gestos.listen((_) => _alDetectarPanico());
+
+    // --- Disparadores del vaciado de la cola --------------------------------
+    //
+    // Hacen falta los tres, porque cada uno cubre un hueco de los otros dos:
+    //
+    // 1. Vuelve la red con la app abierta. Es el caso que antes NO se cubría:
+    //    una alerta encolada se quedaba esperando hasta el siguiente inicio de
+    //    sesión, aunque el wifi hubiera vuelto hacía media hora.
+    // 2. La app vuelve del segundo plano. Cubre el rato en que estuvo dormida,
+    //    cuando el sistema no entrega eventos de conectividad.
+    // 3. Se abre sesión. Cubre el arranque en frío.
+    //
+    // Drenar de más es inofensivo: el cerrojo de `ColaSincronizacion` impide
+    // que dos pasadas envíen la misma operación.
+    if (_servicios.conexion case final DetectorConexionReal real) {
+      real.escuchar();
+    }
+    _conexion = _servicios.conexion.cambios.listen((estado) {
+      if (estado == EstadoConexion.hayInterfaz) _drenarCola();
+    });
+    WidgetsBinding.instance.addObserver(this);
   }
 
   late final ServicioPush _push;
   StreamSubscription<void>? _gestos;
+  StreamSubscription<EstadoConexion>? _conexion;
   bool _pushActivo = false;
   bool _mostrandoCuentaAtras = false;
 
@@ -97,11 +129,23 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
       _push.iniciar();
       // Al recuperar la sesión se reintenta lo que quedó sin enviar por falta
       // de red: una petición de auxilio no debe perderse.
-      ColaPanico(alertas: _servicios.alertas).reintentar();
+      _drenarCola();
     } else if (!_sesion.autenticado && _pushActivo) {
       _pushActivo = false;
       _push.detener();
     }
+  }
+
+  void _drenarCola() {
+    // Sin sesión no hay token que adjuntar: intentarlo solo produciría 401 que
+    // gastarían intentos de operaciones perfectamente válidas.
+    if (!_sesion.autenticado) return;
+    _servicios.cola.drenar();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    if (estado == AppLifecycleState.resumed) _drenarCola();
   }
 
   /// Muestra la cuenta atrás cuando el servicio nativo detecta el gesto.
@@ -124,6 +168,8 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _conexion?.cancel();
     _gestos?.cancel();
     _sesion.removeListener(_sincronizarPush);
     _servicios.cerrar();

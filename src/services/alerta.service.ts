@@ -31,12 +31,37 @@ export interface EmitirAlertaInput {
     longitud: number | null;
     id_usuario: number;
     id_comunidad: number;
+    /// UUID generado por el teléfono antes de enviar. Ver `clave_cliente` en el
+    /// esquema. `null` si el cliente no lo envía.
+    clave_cliente: string | null;
+}
+
+/** Resultado de emitir: la alerta y si ya existía de un intento anterior. */
+export interface ResultadoEmision {
+    alerta: Awaited<ReturnType<typeof prisma.alerta.create>>;
+    yaExistia: boolean;
 }
 
 // ==========================================
 // 1. EMITIR ALERTA
 // ==========================================
-export const emitirAlerta = async (datos: EmitirAlertaInput) => {
+export const emitirAlerta = async (datos: EmitirAlertaInput): Promise<ResultadoEmision> => {
+    // --- Idempotencia -------------------------------------------------------
+    // Va ANTES del control de frecuencia, y el orden importa: reintentar la
+    // MISMA alerta no puede chocar con el límite de 60 segundos. Si se
+    // comprobara después, un reintento legítimo recibiría 429 y el teléfono lo
+    // reprogramaría indefinidamente para una alerta que ya está registrada.
+    if (datos.clave_cliente) {
+        const existente = await prisma.alerta.findUnique({
+            where: { clave_cliente: datos.clave_cliente },
+            include: { usuario: { select: { id_usuario: true, nombre: true } } },
+        });
+        if (existente) {
+            console.log(`♻️  [IDEMPOTENCIA] Clave ya registrada: ${datos.clave_cliente}`);
+            return { alerta: existente, yaExistia: true };
+        }
+    }
+
     const claveFrecuencia = `ultima_alerta_${datos.id_usuario}`;
     const ultima = cacheFrecuencia.get<number>(claveFrecuencia);
 
@@ -57,6 +82,7 @@ export const emitirAlerta = async (datos: EmitirAlertaInput) => {
             // La comunidad se guarda en la propia alerta: si el vecino sale o
             // es expulsado, su historial sigue perteneciendo a la comunidad.
             id_comunidad: datos.id_comunidad,
+            clave_cliente: datos.clave_cliente,
             estado: EstadoAlerta.ACTIVA,
         },
         include: {
@@ -79,7 +105,7 @@ export const emitirAlerta = async (datos: EmitirAlertaInput) => {
     cacheAlertas.del(`alertas_comunidad_${datos.id_comunidad}`);
     console.log(`🗑️  [CACHÉ INVALIDADA] Comunidad #${datos.id_comunidad}`);
 
-    return nuevaAlerta;
+    return { alerta: nuevaAlerta, yaExistia: false };
 };
 
 // ==========================================

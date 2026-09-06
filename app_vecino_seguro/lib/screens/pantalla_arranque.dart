@@ -40,16 +40,22 @@ class _PantallaArranqueState extends State<PantallaArranque> {
     final servicios = context.servicios;
     final sesion = servicios.sesion;
 
-    final token = await sesion.restaurarToken();
+    // Restaura token y perfil guardados. Si ambos estaban, la sesión ya quedó
+    // autenticada aquí mismo y la guardia del enrutador está llevando al vecino
+    // al muro mientras se ejecuta el resto de este método.
+    final token = await sesion.restaurarSesion();
 
     // Sin token guardado: no hay nada que validar. La guardia del enrutador
     // llevará al ingreso en cuanto la sesión pase a `sinSesion`.
     if (token == null) return;
 
+    final entroConPerfilGuardado = sesion.autenticado;
+
     try {
-      // Valida el token contra el servidor y trae el estado de pertenencia.
-      // Si caducó, el cliente responde con un error no recuperable y ya cerró
-      // la sesión por su cuenta.
+      // Valida el token contra el servidor y trae el estado de pertenencia
+      // actual. Sigue siendo necesario aunque ya se haya entrado: el perfil en
+      // caché puede ser viejo —el administrador pudo aprobar la solicitud
+      // mientras tanto—, y si el token caducó el cliente cierra la sesión.
       await servicios.usuarios.obtenerPerfil();
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
@@ -58,9 +64,15 @@ class _PantallaArranqueState extends State<PantallaArranque> {
       // que la guardia lo lleve al ingreso.
       if (!e.esRecuperable) return;
 
-      // Fallo de red con una sesión probablemente válida: se ofrece reintentar
-      // en lugar de expulsarlo al ingreso, que le haría escribir la contraseña
-      // por un problema de conexión.
+      // Sin red pero con perfil guardado: **no se bloquea**. El vecino ya está
+      // dentro, viendo las alertas que tiene en la base local; obligarle a
+      // reintentar aquí sería negarle el acceso a datos que están en su propio
+      // teléfono. La antigüedad de lo que ve se la indica el muro.
+      if (entroConPerfilGuardado && e.esSinConexion) return;
+
+      // Fallo de red sin perfil guardado: se ofrece reintentar en lugar de
+      // expulsarlo al ingreso, que le haría escribir la contraseña por un
+      // problema de conexión.
       setState(() => _estado = VistaError(e.mensaje));
     }
   }

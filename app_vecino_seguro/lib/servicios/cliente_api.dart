@@ -34,11 +34,27 @@ class ExcepcionApi implements Exception {
   final Map<String, String> erroresPorCampo;
 
   // --- Códigos que asigna el propio cliente al interpretar la respuesta ---
+  /// La petición no llegó a obtener respuesta: sin red, tiempo agotado o
+  /// conexión interrumpida.
+  ///
+  /// Es distinto de cualquier error del servidor: aquí **no sabemos** si la
+  /// operación se ejecutó. Por eso una operación encolada que falla así no gasta
+  /// intento, y por eso el muro puede servir su caché local.
+  static const sinConexion = 'SIN_CONEXION';
+
   /// 401: no se envió credencial. El destino pretendido sí se conserva.
   static const sesionRequerida = 'SESION_REQUERIDA';
 
   /// 403 sin código de negocio: token inválido, caducado o cuenta eliminada.
   static const sesionExpirada = 'SESION_EXPIRADA';
+
+  /// 429: el servidor limita a una alerta por vecino cada 60 segundos.
+  ///
+  /// Existe como código para que nadie tenga que deducirlo del texto del
+  /// mensaje. `ColaPanico` lo hacía con `e.mensaje.contains('Espera')`, que
+  /// dependía de una cadena en español: cambiar la redacción del servidor
+  /// habría roto silenciosamente la lógica de reintento.
+  static const limiteFrecuencia = 'LIMITE_FRECUENCIA';
 
   // --- Códigos de negocio que devuelve el servidor ---
   static const sinComunidad = 'SIN_COMUNIDAD';
@@ -55,6 +71,12 @@ class ExcepcionApi implements Exception {
   /// La sesión se cerró: hay que volver a ingresar.
   bool get exigeIngresar =>
       codigo == sesionRequerida || codigo == sesionExpirada;
+
+  /// No hubo respuesta del servidor. Se puede recurrir a los datos locales.
+  bool get esSinConexion => codigo == sinConexion;
+
+  /// El servidor pide esperar (429). No es un rechazo: es un "ahora no".
+  bool get esLimiteDeFrecuencia => codigo == limiteFrecuencia;
 
   @override
   String toString() => mensaje;
@@ -143,16 +165,29 @@ class ClienteApi {
     try {
       respuesta = await peticion().timeout(_tiempoLimite);
     } on TimeoutException {
+      // Los tres fallos de transporte llevan el mismo código. Sin él, "no hay
+      // red" era indistinguible de "el servidor respondió 500", y eso importa:
+      // ante un fallo de red tiene sentido servir la caché local y conservar la
+      // operación en la cola; ante un 500 del servidor, no.
       throw const ExcepcionApi(
         'El servidor tardó demasiado en responder. Revisa tu conexión.',
+        codigo: ExcepcionApi.sinConexion,
       );
     } on SocketException {
-      throw ExcepcionApi(
-        'No pudimos conectarnos al servidor.\n'
-        'Verifica que el backend esté corriendo en $urlBase',
+      // La URL del servidor va al registro de depuración, NO al mensaje: a un
+      // vecino no le dice nada que el backend viva en 10.0.2.2:3333, y además
+      // expone detalle interno de la infraestructura. Aquí sigue disponible
+      // para quien desarrolla, que es a quien le sirve.
+      debugPrint('[API] Sin conexión con $urlBase');
+      throw const ExcepcionApi(
+        'No pudimos conectarnos.\nComprueba tu conexión a internet.',
+        codigo: ExcepcionApi.sinConexion,
       );
     } on http.ClientException {
-      throw const ExcepcionApi('Se interrumpió la comunicación con el servidor.');
+      throw const ExcepcionApi(
+        'Se interrumpió la comunicación con el servidor.',
+        codigo: ExcepcionApi.sinConexion,
+      );
     }
 
     return _interpretar(respuesta);
@@ -227,7 +262,10 @@ class ClienteApi {
     }
 
     if (codigo == 429) {
-      throw ExcepcionApi(mensaje ?? 'Espera un momento antes de volver a intentarlo.');
+      throw ExcepcionApi(
+        mensaje ?? 'Espera un momento antes de volver a intentarlo.',
+        codigo: ExcepcionApi.limiteFrecuencia,
+      );
     }
 
     if (codigo >= 500) {

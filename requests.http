@@ -109,6 +109,32 @@ Content-Type: application/json
   "longitud": -80.4525
 }
 
+### Emitir con clave de cliente → 202 la primera vez
+# El teléfono genera este UUID antes de enviar y lo guarda en su cola local.
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo_alerta": "Robo",
+  "descripcion": "Prueba de idempotencia",
+  "clave_cliente": "11111111-2222-3333-4444-555555555555"
+}
+
+### La MISMA clave otra vez → 200 con `ya_existia: true`, sin crear otra alerta
+# Es el reintento de la cola cuando la respuesta anterior se perdió. Nótese que
+# NO devuelve 429 aunque hayan pasado menos de 60 s: la comprobación de la clave
+# va antes del límite de frecuencia, a propósito.
+POST {{host}}/alertas/emitir
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo_alerta": "Robo",
+  "descripcion": "Prueba de idempotencia",
+  "clave_cliente": "11111111-2222-3333-4444-555555555555"
+}
+
 ### Listar alertas de MI comunidad (el pánico encabeza la lista)
 GET {{host}}/alertas/comunidad
 Authorization: Bearer {{token}}
