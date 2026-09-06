@@ -46,7 +46,10 @@ Content-Type: application/json
   "password": "clave12345"
 }
 
-### --- Validación de entrada → 400 con errores por campo -----------------
+### --- Validación de entrada → 422 con errores por campo -----------------
+# 422 (Unprocessable Content): la petición está bien formada, lo que falla es
+# el contenido. El cliente pinta cada `errores[].campo` en su campo del
+# formulario. Un 400 significa otra cosa: dato correcto, operación improcedente.
 POST {{host}}/usuarios/registro
 Content-Type: application/json
 
@@ -108,6 +111,22 @@ Content-Type: application/json
 
 ### Listar alertas de MI comunidad (el pánico encabeza la lista)
 GET {{host}}/alertas/comunidad
+Authorization: Bearer {{token}}
+
+### Detalle de una alerta → 200
+# Alimenta la pantalla de detalle, que se reconstruye solo con este id: no
+# depende de que el muro se haya cargado antes.
+GET {{host}}/alertas/1
+Authorization: Bearer {{token}}
+
+### Detalle con id no numérico → 400
+GET {{host}}/alertas/abc
+Authorization: Bearer {{token}}
+
+### Detalle de una alerta inexistente o de otra comunidad → 404
+# El mismo código en ambos casos, a propósito: un 403 confirmaría que el id
+# existe y permitiría deducir el volumen de alertas ajenas recorriendo números.
+GET {{host}}/alertas/999999
 Authorization: Bearer {{token}}
 
 ### ==========================================================================

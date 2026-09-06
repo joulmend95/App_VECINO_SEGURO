@@ -33,6 +33,29 @@ class ExcepcionApi implements Exception {
   /// mapa para que cada `CampoTexto` lea el suyo directamente.
   final Map<String, String> erroresPorCampo;
 
+  // --- Códigos que asigna el propio cliente al interpretar la respuesta ---
+  /// 401: no se envió credencial. El destino pretendido sí se conserva.
+  static const sesionRequerida = 'SESION_REQUERIDA';
+
+  /// 403 sin código de negocio: token inválido, caducado o cuenta eliminada.
+  static const sesionExpirada = 'SESION_EXPIRADA';
+
+  // --- Códigos de negocio que devuelve el servidor ---
+  static const sinComunidad = 'SIN_COMUNIDAD';
+  static const noEsAdmin = 'NO_ES_ADMIN';
+
+  /// El rechazo es de permisos, no de credenciales: la sesión sigue siendo
+  /// válida y **no** se ha cerrado.
+  ///
+  /// Existe para que las pantallas no comparen literales sueltos: un
+  /// `e.codigo == 'NO_ES_ADMIN'` mal tecleado no falla al compilar, se limita a
+  /// no entrar nunca en el `if`.
+  bool get esDeAcceso => codigo == sinComunidad || codigo == noEsAdmin;
+
+  /// La sesión se cerró: hay que volver a ingresar.
+  bool get exigeIngresar =>
+      codigo == sesionRequerida || codigo == sesionExpirada;
+
   @override
   String toString() => mensaje;
 }
@@ -153,24 +176,50 @@ class ClienteApi {
 
     final mensaje = cuerpo['mensaje'] as String?;
 
-    // --- Sesión inválida ---------------------------------------------------
-    // Se cierra la sesión aquí, en un solo lugar. Sin esto, cada pantalla
-    // tendría que detectar el 401 y navegar al ingreso por su cuenta, y la que
-    // se olvidara dejaría al usuario atrapado en una pantalla que ya no carga.
+    // --- Rechazos de acceso: 401 y 403 NO significan lo mismo --------------
     //
-    // Excepción: un 403 con código de negocio (SIN_COMUNIDAD, NO_ES_ADMIN) NO
-    // es una sesión inválida — el vecino está autenticado, simplemente le falta
-    // pertenencia o permisos. Cerrar sesión ahí sería expulsarlo por error.
+    // Se resuelven aquí, en un solo lugar. Sin esto, cada pantalla tendría que
+    // detectarlos y navegar por su cuenta, y la que se olvidara dejaría al
+    // usuario atrapado en una pantalla que ya no carga.
     final codigoNegocio = cuerpo['codigo'] as String?;
-    if ((codigo == 401 || codigo == 403) && codigoNegocio == null) {
+
+    // 401 — no se envió credencial. La sesión local ya no sirve, pero el
+    // destino al que iba sigue siendo válido: la guardia lo recuerda en
+    // `?destino=` y lo devuelve ahí en cuanto vuelva a ingresar.
+    if (codigo == 401) {
       await sesion.cerrar();
       throw ExcepcionApi(
-        mensaje ?? 'Tu sesión expiró. Vuelve a ingresar.',
+        mensaje ?? 'Se requiere iniciar sesión.',
+        codigo: ExcepcionApi.sesionRequerida,
         esRecuperable: false,
       );
     }
 
-    if (codigo == 400) {
+    // 403 sin código de negocio — el token existe pero el servidor lo rechaza:
+    // firma inválida, caducado, o la cuenta ya no está. Se cierra sesión igual
+    // que en el 401, pero se marca distinto para que la guardia NO conserve el
+    // destino: si la credencial dejó de ser de fiar, tampoco lo es el rastro
+    // de a dónde iba.
+    if (codigo == 403 && codigoNegocio == null) {
+      await sesion.cerrar();
+      throw ExcepcionApi(
+        mensaje ?? 'Tu sesión expiró. Vuelve a ingresar.',
+        codigo: ExcepcionApi.sesionExpirada,
+        esRecuperable: false,
+      );
+    }
+
+    // 403 CON código de negocio (SIN_COMUNIDAD, NO_ES_ADMIN) no llega a las
+    // ramas anteriores a propósito: el vecino está perfectamente autenticado,
+    // solo le falta pertenencia o permisos. Cerrar sesión ahí sería expulsarlo
+    // por un cambio de rol. Cae al final del método, con su `codigo` intacto,
+    // y la pantalla decide (ver `PantallaSinPermiso`).
+
+    // 422 — la petición está bien formada y el contenido de los campos no.
+    // 400 — dato correcto, operación improcedente (un :id inválido, la
+    // contraseña actual que no coincide). El servidor también adjunta el campo
+    // afectado en ese caso, así que ambos se reparten igual por el formulario.
+    if (codigo == 422 || codigo == 400) {
       throw ExcepcionApi(
         mensaje ?? 'Revisa los datos ingresados.',
         erroresPorCampo: _extraerErrores(cuerpo),

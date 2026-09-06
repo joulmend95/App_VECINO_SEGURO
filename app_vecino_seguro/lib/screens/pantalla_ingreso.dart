@@ -33,6 +33,9 @@ class _PantallaIngresoState extends State<PantallaIngreso> {
   bool _enviando = false;
   bool _ocultarPassword = true;
 
+  /// Campos en los que ya se escribió. Ver [_alValidarTelefono].
+  final Set<String> _tocados = {};
+
   @override
   void dispose() {
     _telefonoCtrl.dispose();
@@ -50,6 +53,20 @@ class _PantallaIngresoState extends State<PantallaIngreso> {
     });
 
     return errorTelefono == null && errorPassword == null;
+  }
+
+  /// Valida el teléfono al abandonar el campo.
+  ///
+  /// Solo el teléfono: la contraseña no se valida en el foco porque aquí su
+  /// única regla es "no vacía", y avisar de eso al salir del campo no le dice
+  /// al usuario nada que no supiera ya.
+  ///
+  /// No se valida un campo vacío que nunca se tocó: quien abre la pantalla y
+  /// pasa el foco por encima no ha cometido ningún error todavía.
+  void _alValidarTelefono(String? error) {
+    if (_telefonoCtrl.text.isEmpty && !_tocados.contains('telefono')) return;
+    if (_errorTelefono == error) return;
+    setState(() => _errorTelefono = error);
   }
 
   Future<void> _ingresar() async {
@@ -104,8 +121,11 @@ class _PantallaIngresoState extends State<PantallaIngreso> {
           tipoTeclado: TextInputType.phone,
           textoError: _errorTelefono,
           onCambio: (_) {
+            _tocados.add('telefono');
             if (_errorTelefono != null) setState(() => _errorTelefono = null);
           },
+          validador: Validadores.telefono(),
+          onValidar: _alValidarTelefono,
         ),
         SizedBox(height: t.espacio.entreGrupos),
         CampoTexto(

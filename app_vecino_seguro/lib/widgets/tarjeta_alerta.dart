@@ -5,8 +5,6 @@ import 'categoria_alerta.dart';
 
 /// Tarjeta que representa **una** alerta de la comunidad.
 ///
-/// Ver contrato completo en `docs/03-catalogo-componentes.md`.
-///
 /// **Identificación en tres canales.** El tipo de alerta se comunica por icono,
 /// la urgencia por color, y ambos se refuerzan con texto visible. Un solo icono
 /// y un solo color harían que todas las alertas activas se vieran iguales, y

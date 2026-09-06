@@ -1,7 +1,6 @@
 /// Modelo del recurso `Alerta` que devuelve `GET /api/alertas/comunidad`.
 ///
 /// Contrato derivado de `src/services/alerta.service.ts` y `prisma/schema.prisma`.
-/// Ver `docs/01-inventario-pantallas.md` §1.
 class Alerta {
   const Alerta({
     required this.idAlerta,

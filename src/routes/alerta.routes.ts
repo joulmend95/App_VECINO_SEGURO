@@ -6,6 +6,7 @@ import {
 import {
     emitirAlertaController,
     listarAlertasComunidadController,
+    obtenerAlertaController,
 } from '../controllers/alerta.controller';
 
 const router = Router();
@@ -21,5 +22,12 @@ router.post('/emitir', verificarAutenticacion, exigirComunidadActiva, emitirAler
 
 // GET /api/alertas/comunidad
 router.get('/comunidad', verificarAutenticacion, exigirComunidadActiva, listarAlertasComunidadController);
+
+// GET /api/alertas/:id
+//
+// Va DESPUÉS de '/comunidad' a propósito. Express resuelve en orden de
+// registro: si el parámetro fuese primero, '/comunidad' entraría por aquí con
+// id = "comunidad" y el listado dejaría de existir.
+router.get('/:id', verificarAutenticacion, exigirComunidadActiva, obtenerAlertaController);
 
 export default router;

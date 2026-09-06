@@ -33,6 +33,10 @@ class _PantallaUnirmeComunidadState extends State<PantallaUnirmeComunidad> {
   bool _verificando = false;
   bool _enviando = false;
 
+  /// El vecino ya escribió algo en el código. Evita marcar en rojo un campo
+  /// vacío por el que solo pasó el foco.
+  bool _tocado = false;
+
   /// Comunidad encontrada con el código. Mientras sea `null`, el botón envía a
   /// verificar; una vez encontrada, envía la solicitud.
   ResumenComunidad? _encontrada;
@@ -122,6 +126,7 @@ class _PantallaUnirmeComunidadState extends State<PantallaUnirmeComunidad> {
           accionTeclado: TextInputAction.search,
           textoError: _errorCodigo,
           onCambio: (_) {
+            _tocado = true;
             // Al cambiar el código, la comunidad verificada deja de ser válida.
             if (_encontrada != null || _errorCodigo != null) {
               setState(() {
@@ -129,6 +134,16 @@ class _PantallaUnirmeComunidadState extends State<PantallaUnirmeComunidad> {
                 _errorCodigo = null;
               });
             }
+          },
+          validador: Validadores.codigoComunidad(),
+          onValidar: (error) {
+            if (_codigoCtrl.text.isEmpty && !_tocado) return;
+            // No se pisa el resultado de una verificación ya hecha: si el
+            // servidor confirmó la comunidad, el formato es correcto por
+            // definición y volver a evaluarlo solo puede empeorar el mensaje.
+            if (_encontrada != null) return;
+            if (_errorCodigo == error) return;
+            setState(() => _errorCodigo = error);
           },
           onEnviar: (_) => _verificarCodigo(),
         ),

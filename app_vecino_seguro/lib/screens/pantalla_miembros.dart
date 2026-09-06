@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../modelos/miembro.dart';
+import '../navegacion/rutas.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
@@ -118,6 +120,14 @@ class _PantallaMiembrosState extends State<PantallaMiembros> {
       await _cargar();
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
+      // Expulsar es la única acción de esta pantalla que exige ser
+      // administrador. Listar los vecinos no, así que el 403 con NO_ES_ADMIN
+      // solo puede venir de aquí. La sesión NO se cierra: sigue siendo un
+      // vecino válido de la comunidad, solo que ya no la administra.
+      if (e.codigo == ExcepcionApi.noEsAdmin) {
+        context.go(Rutas.sinPermiso);
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(e.mensaje)));

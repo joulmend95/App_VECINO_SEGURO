@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'borrador_alerta.dart';
 import 'cliente_api.dart';
 import 'servicio_alertas.dart';
 import 'servicio_comunidades.dart';
@@ -37,8 +38,15 @@ class Servicios {
   late final ServicioNotificaciones notificaciones;
   late final ServicioPanico panico;
 
+  /// Estado de aplicación, no un servicio: el borrador de la alerta en curso.
+  ///
+  /// Cuelga de aquí porque necesita sobrevivir al desmontaje de la pantalla que
+  /// lo edita. Ver [BorradorAlerta] para el razonamiento completo.
+  final BorradorAlerta borrador = BorradorAlerta();
+
   void cerrar() {
     panico.cerrar();
+    borrador.dispose();
     api.cerrar();
   }
 }

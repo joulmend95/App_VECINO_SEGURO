@@ -33,6 +33,12 @@ class _PantallaCrearComunidadState extends State<PantallaCrearComunidad> {
   String? _errorGeneral;
   bool _enviando = false;
 
+  /// Campos ya escritos: no se valida al perder el foco un campo vacío que el
+  /// vecino nunca llegó a tocar.
+  final Set<String> _tocados = {};
+
+  static const _validadorNombre = 'El nombre de la comunidad';
+
   @override
   void dispose() {
     _nombreCtrl.dispose();
@@ -42,7 +48,7 @@ class _PantallaCrearComunidadState extends State<PantallaCrearComunidad> {
 
   bool _validar() {
     final errorNombre = Validadores.longitudMinima(
-      'El nombre de la comunidad',
+      _validadorNombre,
       3,
     )(_nombreCtrl.text);
     final errorCodigo = Validadores.codigoComunidad()(_codigoCtrl.text);
@@ -53,6 +59,18 @@ class _PantallaCrearComunidadState extends State<PantallaCrearComunidad> {
     });
 
     return errorNombre == null && errorCodigo == null;
+  }
+
+  /// Valida al abandonar el campo, salvo que siga vacío y sin tocar.
+  void _alValidar(String campo, TextEditingController ctrl, String? error) {
+    if (ctrl.text.isEmpty && !_tocados.contains(campo)) return;
+    setState(() {
+      if (campo == 'nombre') {
+        _errorNombre = error;
+      } else {
+        _errorCodigo = error;
+      }
+    });
   }
 
   Future<void> _crear() async {
@@ -111,8 +129,11 @@ class _PantallaCrearComunidadState extends State<PantallaCrearComunidad> {
           icono: Icons.holiday_village_outlined,
           textoError: _errorNombre,
           onCambio: (_) {
+            _tocados.add('nombre');
             if (_errorNombre != null) setState(() => _errorNombre = null);
           },
+          validador: Validadores.longitudMinima(_validadorNombre, 3),
+          onValidar: (e) => _alValidar('nombre', _nombreCtrl, e),
         ),
         SizedBox(height: t.espacio.entreGrupos),
         CampoTexto(
@@ -123,8 +144,11 @@ class _PantallaCrearComunidadState extends State<PantallaCrearComunidad> {
           accionTeclado: TextInputAction.done,
           textoError: _errorCodigo,
           onCambio: (_) {
+            _tocados.add('codigo');
             if (_errorCodigo != null) setState(() => _errorCodigo = null);
           },
+          validador: Validadores.codigoComunidad(),
+          onValidar: (e) => _alValidar('codigo', _codigoCtrl, e),
           onEnviar: (_) => _crear(),
         ),
       ],

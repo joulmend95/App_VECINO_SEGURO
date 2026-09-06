@@ -73,3 +73,41 @@ export const listarAlertasComunidadController = async (
         res.status(500).json({ mensaje: 'No pudimos obtener las alertas.' });
     }
 };
+
+/**
+ * GET /api/alertas/:id
+ *
+ * Devuelve una alerta concreta de la comunidad del vecino autenticado.
+ *
+ * Existe para que la pantalla de detalle pueda reconstruirse a partir de su
+ * dirección: abrir `/alertas/42` en frío no requiere haber pasado antes por el
+ * muro ni transportar el objeto entre pantallas.
+ *
+ * **404 tanto si la alerta no existe como si es de otra comunidad.** Responder
+ * 403 en el segundo caso confirmaría que ese identificador existe, y bastaría
+ * con recorrer los números para deducir el volumen de alertas de comunidades
+ * ajenas. El mismo código para ambos no filtra nada.
+ */
+export const obtenerAlertaController = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        // `Number()` y no `parseInt()`: parseInt('42abc') devuelve 42, así que
+        // una ruta malformada pasaría por válida.
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            res.status(400).json({ mensaje: 'El identificador de la alerta no es válido.' });
+            return;
+        }
+
+        const alerta = await alertaService.obtenerAlertaPorId(id, req.user!.id_comunidad!);
+
+        if (!alerta) {
+            res.status(404).json({ mensaje: 'Esta alerta no existe o ya no está disponible.' });
+            return;
+        }
+
+        res.status(200).json({ alerta });
+    } catch (error) {
+        console.error('[obtenerAlerta]', error);
+        res.status(500).json({ mensaje: 'No pudimos obtener la alerta.' });
+    }
+};

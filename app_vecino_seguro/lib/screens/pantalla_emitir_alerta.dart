@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../servicios/borrador_alerta.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
@@ -22,6 +23,11 @@ import '../widgets/selector_categoria.dart';
 /// 2. **La confirmación es obligatoria.** Emitir notifica a toda la comunidad y
 ///    no se puede deshacer. Sin ese paso, un toque accidental erosiona la
 ///    confianza de todos los vecinos, que acaban ignorando las alertas.
+///
+/// 3. **Lo escrito no se pierde al salir.** La categoría y el detalle se
+///    guardan en [BorradorAlerta], que vive fuera de esta pantalla. Ir al muro
+///    a comprobar si alguien ya avisó y volver es un gesto natural; perder el
+///    texto por hacerlo, no.
 class PantallaEmitirAlerta extends StatefulWidget {
   const PantallaEmitirAlerta({super.key});
 
@@ -36,8 +42,27 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
   String? _errorGeneral;
   bool _enviando = false;
 
+  /// Se resuelve en [didChangeDependencies]: `context.servicios` no está
+  /// disponible todavía en `initState`.
+  BorradorAlerta? _borrador;
+  bool _restaurado = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_restaurado) return;
+    _restaurado = true;
+
+    final borrador = context.servicios.borrador;
+    _borrador = borrador;
+    _categoria = borrador.categoria;
+    _descripcionCtrl.text = borrador.descripcion;
+  }
+
   @override
   void dispose() {
+    // El borrador NO se limpia aquí: salir de la pantalla es justamente el caso
+    // que motiva su existencia.
     _descripcionCtrl.dispose();
     super.dispose();
   }
@@ -78,6 +103,11 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
         descripcion: _descripcionCtrl.text,
       );
       if (!mounted) return;
+
+      // Solo ahora se descarta el borrador: la alerta ya está en el servidor.
+      // Limpiarlo antes de confirmar el 202 borraría el texto de alguien cuya
+      // emisión acabó fallando por red.
+      _borrador?.limpiar();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Alerta emitida. Tu comunidad ya fue notificada.')),
@@ -140,6 +170,7 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
                       habilitado: !_enviando,
                       onSeleccionar: (categoria) => setState(() {
                         _categoria = categoria;
+                        _borrador?.categoria = categoria;
                         _errorGeneral = null;
                       }),
                     ),
@@ -154,6 +185,9 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
                       habilitado: !_enviando,
                       maxLineas: 3,
                       accionTeclado: TextInputAction.done,
+                      // Sin `setState`: el controlador ya repinta el campo, y
+                      // aquí solo se replica el texto en el borrador.
+                      onCambio: (texto) => _borrador?.descripcion = texto,
                     ),
 
                     SizedBox(height: t.espacio.entreGrupos),

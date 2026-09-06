@@ -92,7 +92,16 @@ export function validar(reglas: ReglaCampo[]) {
         }
 
         if (errores.length > 0) {
-            res.status(400).json({ mensaje: 'Revisa los datos ingresados.', errores });
+            // 422 y no 400: la petición está bien formada —JSON válido, ruta
+            // correcta—, lo que falla es el CONTENIDO de los campos. Esa es
+            // exactamente la semántica de "Unprocessable Content" (RFC 9110
+            // §15.5.21), y permite al cliente distinguir sin ambigüedad un
+            // error que debe pintar campo por campo de un 400 de negocio.
+            //
+            // Los 400 que devuelven los controladores se conservan: ahí el
+            // dato es sintácticamente correcto pero la operación no procede
+            // (un :id no numérico, una contraseña actual que no coincide).
+            res.status(422).json({ mensaje: 'Revisa los datos ingresados.', errores });
             return;
         }
 

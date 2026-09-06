@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 /// único lugar sin tocar una sola pantalla.
 ///
 /// Todos los pares de color derivados de esta paleta fueron verificados contra
-/// WCAG 2.1 (38/38 pares aprobados). Ver `docs/02-tokens-y-contraste.md`.
+/// WCAG 2.1. La auditoría la ejecuta `herramientas/verificar_contraste.js`.
 /// ============================================================================
 
 /// Paleta cruda de color. Escalas de 50 (más claro) a 900 (más oscuro).

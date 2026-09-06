@@ -31,6 +31,18 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
   final _confirmarCtrl = TextEditingController();
 
   final Map<String, String?> _errores = {};
+
+  /// Campos en los que el vecino ya escribió algo.
+  ///
+  /// Sirve para no validar al perder el foco un campo que sigue vacío y nunca
+  /// se tocó: pasar por encima con el tabulador no es un error del usuario, y
+  /// recibirlo todo en rojo antes de haber escrito nada es hostil.
+  final Set<String> _tocados = {};
+
+  /// Campos que esta pantalla sabe pintar. Lo que el servidor devuelva fuera de
+  /// esta lista no se pierde: se muestra como error general.
+  static const _camposConocidos = {'nombre', 'telefono', 'password', 'confirmar'};
+
   String? _errorGeneral;
   bool _enviando = false;
   bool _ocultarPassword = true;
@@ -82,14 +94,18 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
       setState(() {
-        // Los errores por campo del servidor se pintan en su campo; solo lo que
-        // no encaja en ninguno se muestra como error general.
-        if (e.erroresPorCampo.isNotEmpty) {
-          _errores.addAll(e.erroresPorCampo);
-          _errorGeneral = null;
-        } else {
-          _errorGeneral = e.mensaje;
-        }
+        // Un 422 trae los campos que el servidor rechazó. Cada uno se pinta en
+        // su campo, que es donde el vecino puede corregirlo: un bloque de error
+        // arriba le obliga a deducir a cuál de los cuatro se refiere.
+        final porCampo = e.erroresPorCampo;
+        _errores.addAll(porCampo);
+
+        // Si el servidor señala un campo que esta pantalla no muestra, el
+        // mensaje general se conserva: de lo contrario el error desaparecería
+        // sin dejar rastro y el formulario parecería no haber hecho nada.
+        final hayDesconocidos =
+            porCampo.keys.any((c) => !_camposConocidos.contains(c));
+        _errorGeneral = (porCampo.isEmpty || hayDesconocidos) ? e.mensaje : null;
       });
     } finally {
       // También en caso de éxito: si la guardia no llegara a navegar, el botón
@@ -98,8 +114,21 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
     }
   }
 
-  void _limpiarError(String campo) {
+  /// Al escribir: se marca el campo como tocado y se retira el error anterior.
+  ///
+  /// El error no se recalcula en cada tecla — un teléfono a medio escribir
+  /// siempre es inválido, y pintarlo en rojo mientras se teclea castiga al
+  /// usuario por no haber terminado.
+  void _alEscribir(String campo) {
+    _tocados.add(campo);
     if (_errores[campo] != null) setState(() => _errores[campo] = null);
+  }
+
+  /// Resultado de validar al abandonar el campo.
+  void _alValidar(String campo, TextEditingController controlador, String? error) {
+    if (controlador.text.isEmpty && !_tocados.contains(campo)) return;
+    if (_errores[campo] == error) return;
+    setState(() => _errores[campo] = error);
   }
 
   @override
@@ -125,7 +154,9 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
           icono: Icons.person_outline,
           tipoTeclado: TextInputType.name,
           textoError: _errores['nombre'],
-          onCambio: (_) => _limpiarError('nombre'),
+          onCambio: (_) => _alEscribir('nombre'),
+          validador: Validadores.nombre(),
+          onValidar: (e) => _alValidar('nombre', _nombreCtrl, e),
         ),
         separador,
         CampoTexto(
@@ -135,7 +166,9 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
           icono: Icons.phone_outlined,
           tipoTeclado: TextInputType.phone,
           textoError: _errores['telefono'],
-          onCambio: (_) => _limpiarError('telefono'),
+          onCambio: (_) => _alEscribir('telefono'),
+          validador: Validadores.telefono(),
+          onValidar: (e) => _alValidar('telefono', _telefonoCtrl, e),
         ),
         separador,
         CampoTexto(
@@ -145,7 +178,9 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
           icono: Icons.lock_outline,
           esOculto: _ocultarPassword,
           textoError: _errores['password'],
-          onCambio: (_) => _limpiarError('password'),
+          onCambio: (_) => _alEscribir('password'),
+          validador: Validadores.passwordNueva(),
+          onValidar: (e) => _alValidar('password', _passwordCtrl, e),
           accionSufijo: IconButton(
             onPressed: () =>
                 setState(() => _ocultarPassword = !_ocultarPassword),
@@ -167,7 +202,15 @@ class _PantallaRegistroState extends State<PantallaRegistro> {
           esOculto: _ocultarPassword,
           accionTeclado: TextInputAction.done,
           textoError: _errores['confirmar'],
-          onCambio: (_) => _limpiarError('confirmar'),
+          onCambio: (_) => _alEscribir('confirmar'),
+          // Lee la contraseña en el momento de validar, no al construir el
+          // widget: si se capturara el valor ahora, comparar contra ella
+          // dejaría de tener sentido en cuanto el vecino cambiara la de arriba.
+          validador: Validadores.coincideCon(
+            () => _passwordCtrl.text,
+            'La contraseña',
+          ),
+          onValidar: (e) => _alValidar('confirmar', _confirmarCtrl, e),
           onEnviar: (_) => _registrar(),
         ),
       ],

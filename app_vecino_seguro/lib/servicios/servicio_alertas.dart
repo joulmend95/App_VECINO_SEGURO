@@ -19,6 +19,24 @@ class ServicioAlertas {
     return RespuestaAlertas.desdeJson(json);
   }
 
+  /// `GET /api/alertas/:id`
+  ///
+  /// Existe para que la pantalla de detalle pueda reconstruirse a partir de su
+  /// dirección. Sin este endpoint habría que transportar el objeto [Alerta]
+  /// desde el muro, y abrir `/alertas/42` en frío mostraría una pantalla vacía.
+  ///
+  /// El servidor responde 404 tanto si la alerta no existe como si pertenece a
+  /// otra comunidad; el mensaje que llega ya está redactado para el usuario.
+  Future<Alerta> obtenerPorId(int idAlerta) async {
+    final json = await _api.obtener('/api/alertas/$idAlerta');
+
+    final alerta = json['alerta'];
+    if (alerta is! Map<String, dynamic>) {
+      throw const ExcepcionApi('El servidor no devolvió la alerta solicitada.');
+    }
+    return Alerta.desdeJson(alerta);
+  }
+
   /// `POST /api/alertas/emitir`
   ///
   /// Con [esPanico] en `true` el tipo lo asigna el servidor: es el disparo por

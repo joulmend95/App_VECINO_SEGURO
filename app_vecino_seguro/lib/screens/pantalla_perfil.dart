@@ -38,6 +38,21 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
 
   bool _camposIniciados = false;
 
+  /// Campos en los que el vecino ya escribió.
+  ///
+  /// Nombre y teléfono llegan rellenados con sus datos actuales, así que no
+  /// están vacíos y sí se validan al perder el foco. Los tres de contraseña
+  /// empiezan vacíos: ahí este conjunto evita marcarlos en rojo por el simple
+  /// hecho de haber pasado el foco por encima.
+  final Set<String> _tocados = {};
+
+  /// Valida un campo al abandonarlo.
+  void _alValidar(String campo, TextEditingController ctrl, String? error) {
+    if (ctrl.text.isEmpty && !_tocados.contains(campo)) return;
+    if (_errores[campo] == error) return;
+    setState(() => _errores[campo] = error);
+  }
+
   /// Rellena los campos con los datos actuales del vecino.
   ///
   /// Va aquí y no en `initState` porque leer `context.sesion` depende de un
@@ -69,6 +84,7 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
   }
 
   void _limpiar(String campo) {
+    _tocados.add(campo);
     if (_errores[campo] != null) setState(() => _errores[campo] = null);
   }
 
@@ -125,11 +141,15 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
       setState(() {
-        if (e.erroresPorCampo.isNotEmpty) {
-          _errores.addAll(e.erroresPorCampo);
-        } else {
-          _errorDatos = e.mensaje;
-        }
+        final porCampo = e.erroresPorCampo;
+        _errores.addAll(porCampo);
+
+        // Un 409 por teléfono ya registrado llega sin campo asociado: ese es
+        // el caso que debe seguir viéndose en el bloque general.
+        const conocidos = {'nombre', 'telefono'};
+        final hayDesconocidos =
+            porCampo.keys.any((c) => !conocidos.contains(c));
+        _errorDatos = (porCampo.isEmpty || hayDesconocidos) ? e.mensaje : null;
       });
     } finally {
       if (mounted) setState(() => _guardandoDatos = false);
@@ -180,11 +200,16 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
       setState(() {
-        if (e.erroresPorCampo.isNotEmpty) {
-          _errores.addAll(e.erroresPorCampo);
-        } else {
-          _errorPassword = e.mensaje;
-        }
+        // El servidor señala `password_actual` con un 400 —no un 401— cuando
+        // la contraseña actual no coincide, precisamente para que se pinte en
+        // su campo en lugar de cerrar la sesión. Ver `usuario.controller.ts`.
+        final porCampo = e.erroresPorCampo;
+        _errores.addAll(porCampo);
+
+        const conocidos = {'password_actual', 'password_nueva', 'repetir'};
+        final hayDesconocidos =
+            porCampo.keys.any((c) => !conocidos.contains(c));
+        _errorPassword = (porCampo.isEmpty || hayDesconocidos) ? e.mensaje : null;
       });
     } finally {
       if (mounted) setState(() => _guardandoPassword = false);
@@ -228,6 +253,8 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
               habilitado: !_guardandoDatos,
               textoError: _errores['nombre'],
               onCambio: (_) => _limpiar('nombre'),
+              validador: Validadores.nombre(),
+              onValidar: (e) => _alValidar('nombre', _nombreCtrl, e),
             ),
             separador,
             CampoTexto(
@@ -239,6 +266,8 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
               habilitado: !_guardandoDatos,
               textoError: _errores['telefono'],
               onCambio: (_) => _limpiar('telefono'),
+              validador: Validadores.telefono(),
+              onValidar: (e) => _alValidar('telefono', _telefonoCtrl, e),
             ),
             separador,
             BotonAccion(
@@ -289,6 +318,8 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
               habilitado: !_guardandoPassword,
               textoError: _errores['password_nueva'],
               onCambio: (_) => _limpiar('password_nueva'),
+              validador: Validadores.passwordNueva(),
+              onValidar: (e) => _alValidar('password_nueva', _nuevaCtrl, e),
             ),
             separador,
             CampoTexto(
@@ -300,6 +331,11 @@ class _PantallaPerfilState extends State<PantallaPerfil> {
               accionTeclado: TextInputAction.done,
               textoError: _errores['repetir'],
               onCambio: (_) => _limpiar('repetir'),
+              validador: Validadores.coincideCon(
+                () => _nuevaCtrl.text,
+                'La contraseña',
+              ),
+              onValidar: (e) => _alValidar('repetir', _repetirCtrl, e),
               onEnviar: (_) => _cambiarPassword(),
             ),
             separador,

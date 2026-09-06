@@ -120,6 +120,33 @@ export const obtenerAlertasPorComunidad = async (id_comunidad: number) => {
     return { fuente: 'BASE_DE_DATOS_POSTGRESQL', data: alertasBD };
 };
 
+// ==========================================
+// 3. OBTENER UNA ALERTA POR SU ID
+// ==========================================
+/**
+ * Devuelve una alerta concreta, o `null` si no existe o no pertenece a la
+ * comunidad indicada.
+ *
+ * La pertenencia se filtra **dentro del `where`**, no comprobando el resultado
+ * después: así la consulta no puede devolver jamás una alerta ajena, ni
+ * siquiera para descartarla acto seguido.
+ *
+ * No se cachea. El listado se consulta constantemente y se beneficia del TTL;
+ * el detalle se abre de una en una y conviene que muestre el estado real, sobre
+ * todo si la alerta acaba de cambiar.
+ */
+export const obtenerAlertaPorId = async (id_alerta: number, id_comunidad: number) => {
+    return prisma.alerta.findFirst({
+        where: { id_alerta, id_comunidad },
+        include: {
+            usuario: {
+                select: { id_usuario: true, nombre: true, telefono: true },
+                // Nunca se incluye 'password'.
+            },
+        },
+    });
+};
+
 /** Permite invalidar la caché desde otros servicios (p. ej. al cerrar una alerta). */
 export const invalidarCacheComunidad = (id_comunidad: number): void => {
     cacheAlertas.del(`alertas_comunidad_${id_comunidad}`);

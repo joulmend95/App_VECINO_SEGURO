@@ -17,7 +17,7 @@ import '../widgets/vista_estado.dart';
 
 /// **P4 — Muro de Alertas de la Comunidad**
 ///
-/// Consume `GET /api/alertas/comunidad`. Ver `docs/01-inventario-pantallas.md`.
+/// Consume `GET /api/alertas/comunidad`.
 ///
 /// Está ensamblada **exclusivamente** con componentes del catálogo:
 /// [CampoTexto], [TarjetaAlerta], [BotonAccion] y [VistaEstado].
@@ -394,18 +394,14 @@ class _ListaAlertas extends StatelessWidget {
             // dejar que se deduzca del texto libre. Sin esto, una alerta de
             // emergencia real se mostraba como urgencia media.
             categoria: alerta.esPanico ? CategoriaAlerta.panico : null,
-            onTap: () => _mostrarDetalle(context, alerta),
+            // Se navega con el identificador, no con el objeto `alerta`.
+            // La pantalla de detalle lo pide al servidor por su cuenta, y así
+            // `/alertas/42` funciona igual venga del muro, de una notificación
+            // o de reabrir la app en esa dirección.
+            onTap: () => context.push(Rutas.aDetalleAlerta(alerta.idAlerta)),
             accionFinal: const _IndicadorDetalle(),
           );
         },
-      ),
-    );
-  }
-
-  void _mostrarDetalle(BuildContext context, Alerta alerta) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Alerta #${alerta.idAlerta}: ${alerta.tipoAlerta}'),
       ),
     );
   }

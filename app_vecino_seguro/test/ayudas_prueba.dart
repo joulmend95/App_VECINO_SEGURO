@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:app_vecino_seguro/modelos/perfil_vecino.dart';
+import 'package:app_vecino_seguro/navegacion/rutas.dart';
 import 'package:app_vecino_seguro/servicios/almacen_seguro.dart';
 import 'package:app_vecino_seguro/servicios/cliente_api.dart';
 import 'package:app_vecino_seguro/servicios/dependencias.dart';
@@ -70,6 +72,9 @@ Map<String, dynamic> alertaJson({
 String cuerpoAlertas(List<Map<String, dynamic>> alertas) =>
     jsonEncode({'fuente': 'BASE_DE_DATOS_POSTGRESQL', 'data': alertas});
 
+/// Respuesta de `GET /api/alertas/:id`: la alerta va bajo `alerta`, no `data`.
+String cuerpoAlerta(Map<String, dynamic> alerta) => jsonEncode({'alerta': alerta});
+
 // ---------------------------------------------------------------------------
 // SERVIDOR SIMULADO
 // ---------------------------------------------------------------------------
@@ -109,6 +114,29 @@ http.Response falla(int codigo, [String mensaje = 'error']) => http.Response(
   headers: {'content-type': 'application/json; charset=utf-8'},
 );
 
+/// Error de validación tal como lo devuelve el servidor: 422 con el campo
+/// afectado, para que el formulario pueda pintarlo donde corresponde.
+http.Response fallaValidacion(Map<String, String> porCampo, {int codigo = 422}) =>
+    http.Response(
+      jsonEncode({
+        'mensaje': 'Revisa los datos ingresados.',
+        'errores': [
+          for (final e in porCampo.entries)
+            {'campo': e.key, 'mensaje': e.value},
+        ],
+      }),
+      codigo,
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    );
+
+/// Rechazo con código de negocio: la sesión es válida, falta el permiso.
+http.Response fallaNegocio(int codigo, String codigoNegocio, String mensaje) =>
+    http.Response(
+      jsonEncode({'mensaje': mensaje, 'codigo': codigoNegocio}),
+      codigo,
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    );
+
 // ---------------------------------------------------------------------------
 // MONTAJE
 // ---------------------------------------------------------------------------
@@ -122,6 +150,10 @@ Sesion sesionDePrueba({String? tokenGuardado}) {
   );
 }
 
+/// Perfil ya deserializado, para abrir sesión sin pasar por el servidor.
+PerfilVecino perfilDePrueba({String estado = 'ACTIVO', bool esAdmin = false}) =>
+    PerfilVecino.desdeJson(perfilJson(estado: estado, esAdmin: esAdmin));
+
 /// Sesión ya autenticada y activa, para pruebas que no ejercitan el ingreso.
 Future<Sesion> sesionActiva({bool esAdmin = false}) async {
   final sesion = sesionDePrueba();
@@ -131,6 +163,50 @@ Future<Sesion> sesionActiva({bool esAdmin = false}) async {
   );
   return sesion;
 }
+
+/// Monta la aplicación **con el enrutador real**, para probar las guardias.
+///
+/// A diferencia de [montarConDependencias], que monta una pantalla suelta,
+/// aquí se ejercita `construirEnrutador` de verdad: redirecciones, rutas
+/// anidadas y parámetros de ruta. Devuelve el `GoRouter` para poder consultar
+/// la dirección actual y navegar desde la prueba.
+({Widget app, GoRouter enrutador}) montarAppConEnrutador({
+  required Sesion sesion,
+  required MockClient cliente,
+  String? rutaInicial,
+}) {
+  final servicios = Servicios(
+    sesion: sesion,
+    cliente: ClienteApi(
+      sesion: sesion,
+      cliente: cliente,
+      urlBase: 'http://servidor-falso',
+    ),
+  );
+
+  final enrutador = construirEnrutador(sesion);
+  if (rutaInicial != null) enrutador.go(rutaInicial);
+
+  return (
+    app: Dependencias(
+      servicios: servicios,
+      child: ListenableBuilder(
+        listenable: sesion,
+        builder: (context, _) => MaterialApp.router(
+          theme: TemaApp.claro,
+          darkTheme: TemaApp.oscuro,
+          themeMode: ThemeMode.light,
+          routerConfig: enrutador,
+        ),
+      ),
+    ),
+    enrutador: enrutador,
+  );
+}
+
+/// Dirección que muestra el enrutador ahora mismo, incluida su consulta.
+String ubicacionActual(GoRouter enrutador) =>
+    enrutador.routerDelegate.currentConfiguration.uri.toString();
 
 /// Envuelve un widget con tema y dependencias reales.
 Widget montarConDependencias({

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../modelos/solicitud.dart';
+import '../navegacion/rutas.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
@@ -49,6 +51,15 @@ class _PantallaSolicitudesState extends State<PantallaSolicitudes> {
       });
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
+      // Un 403 NO_ES_ADMIN no es un fallo de carga que se pueda reintentar: el
+      // vecino dejó de ser administrador y ningún reintento va a devolverle el
+      // permiso. Se le lleva a una pantalla que se lo explica, y —esto es lo
+      // importante— sin cerrarle la sesión: su credencial es perfectamente
+      // válida, lo que cambió fue su rol.
+      if (e.codigo == ExcepcionApi.noEsAdmin) {
+        context.go(Rutas.sinPermiso);
+        return;
+      }
       setState(() => _estado = VistaError(e.mensaje));
     }
   }
@@ -68,6 +79,10 @@ class _PantallaSolicitudesState extends State<PantallaSolicitudes> {
       await _cargar();
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
+      if (e.codigo == ExcepcionApi.noEsAdmin) {
+        context.go(Rutas.sinPermiso);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.mensaje)));
       setState(() => _resolviendo.remove(solicitud.idSolicitud));
     }

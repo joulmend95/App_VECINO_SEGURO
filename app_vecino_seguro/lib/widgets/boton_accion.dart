@@ -16,8 +16,6 @@ enum VarianteBoton {
 
 /// Botón de acción del catálogo.
 ///
-/// Ver contrato completo en `docs/03-catalogo-componentes.md`.
-///
 /// Invariantes garantizadas:
 /// - Nunca mide menos que `tokens.tamano.areaTactilMinima` de alto (WCAG 2.5.5).
 /// - Con `cargando: true` conserva su ancho: el texto sigue ocupando espacio

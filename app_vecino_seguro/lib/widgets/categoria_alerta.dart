@@ -161,8 +161,8 @@ enum CategoriaAlerta {
 /// Resuelve los colores de una urgencia desde los tokens del tema.
 ///
 /// Vive aquí y no en cada widget para que la asociación urgencia → color se
-/// defina una sola vez. Todos los pares están verificados contra WCAG
-/// (ver `docs/02-tokens-y-contraste.md`).
+/// defina una sola vez. Todos los pares están verificados contra WCAG por
+/// `herramientas/verificar_contraste.js`.
 extension ColoresDeUrgencia on NivelUrgencia {
   /// Relleno del avatar y del distintivo.
   Color relleno(BuildContext context) {
