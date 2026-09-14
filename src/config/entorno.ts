@@ -1,3 +1,5 @@
+import type { SignOptions } from 'jsonwebtoken';
+
 /**
  * Configuración validada del entorno.
  *
@@ -41,8 +43,32 @@ export const PORT = Number(process.env.PORT || 3333);
 
 export const ES_PRODUCCION = esProduccion;
 
-/** Vigencia del token de sesión. */
-export const DURACION_TOKEN = '7d';
+/**
+ * Vigencia del token de **acceso**.
+ *
+ * Antes eran 7 días, y con eso una credencial robada servía una semana entera.
+ * Ahora son 15 minutos: el token de renovación se encarga de que el vecino no
+ * note la diferencia, y la ventana de daño de una filtración pasa de días a
+ * minutos.
+ *
+ * Se puede acortar por entorno para demostrar la renovación sin esperar:
+ *
+ *     DURACION_TOKEN=30s npm run dev
+ *
+ * El tipo se toma de `jsonwebtoken` en lugar de `string`: al venir de una
+ * variable de entorno deja de ser un literal, y sin esta anotación TypeScript
+ * no resuelve la sobrecarga de `jwt.sign`.
+ */
+export const DURACION_TOKEN = (process.env.DURACION_TOKEN ||
+    '15m') as SignOptions['expiresIn'];
+
+/**
+ * Vigencia del token de **renovación**.
+ *
+ * Es lo que de verdad mide cuánto dura una sesión: pasados 30 días sin usar la
+ * aplicación, el vecino vuelve a escribir su contraseña.
+ */
+export const DURACION_RENOVACION_DIAS = 30;
 
 /** Coste de bcrypt. 10 rondas es el equilibrio habitual entre seguridad y latencia. */
 export const RONDAS_BCRYPT = 10;

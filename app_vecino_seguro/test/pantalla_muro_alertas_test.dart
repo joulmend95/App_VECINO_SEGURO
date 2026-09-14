@@ -148,8 +148,20 @@ void main() {
         if (peticion.url.path.contains('token-prueba')) {
           return http.Response(jsonEncode({'token': 'jwt-de-prueba'}), 200);
         }
+
+        // El contador se limita al endpoint de alertas. La pantalla también
+        // pide `/api/notificaciones`, y un contador compartido mezclaba los
+        // reintentos de ambos: el muro acababa recibiendo la respuesta buena
+        // destinada a la otra petición y la pantalla de error no aparecía.
+        if (!peticion.url.path.contains('alertas/comunidad')) {
+          return http.Response('{"no_leidas":0,"data":[]}', 200);
+        }
+
         intentos++;
-        if (intentos == 1) return http.Response('boom', 500);
+        // Tres fallos: el original más los dos reintentos automáticos del
+        // interceptor. Con menos, el 500 se recuperaría solo y la pantalla de
+        // error —que es lo que esta prueba comprueba— nunca aparecería.
+        if (intentos <= 3) return http.Response('boom', 500);
         return http.Response(
           _cuerpoConAlertas([_alertaJson(tipo: 'Incendio')]),
           200,

@@ -26,6 +26,52 @@ Content-Type: application/json
 }
 
 @token = {{login.response.body.token}}
+@renovacion = {{login.response.body.token_renovacion}}
+
+### --- RENOVACIÓN: canjear el par ----------------------------------------
+# El token de acceso dura 15 min (o lo que diga DURACION_TOKEN); este endpoint
+# entrega uno nuevo sin volver a pedir la contraseña.
+#
+# NO lleva Authorization a propósito: se llama justo cuando el de acceso ya
+# caducó. La credencial aquí es el propio token de renovación.
+#
+# Devuelve 200 con un par NUEVO: el token de renovación se ROTA, el usado queda
+# revocado.
+# @name renovar
+POST {{host}}/usuarios/renovar
+Content-Type: application/json
+
+{
+  "token_renovacion": "{{renovacion}}"
+}
+
+### --- Reutilizar un token de renovación ya gastado → 401 ------------------
+# Es la señal de que el token se filtró: el dueño y el atacante estarían usando
+# el mismo. El servidor revoca TODAS las sesiones del vecino y deja el aviso
+# 🚨 [SEGURIDAD] en el registro.
+POST {{host}}/usuarios/renovar
+Content-Type: application/json
+
+{
+  "token_renovacion": "{{renovacion}}"
+}
+
+### --- Token de acceso caducado → 401 con codigo TOKEN_EXPIRADO -----------
+# Antes esto devolvía 403, y estaba mal: según RFC 9110, 403 es "te identifiqué
+# y aun así no puedes"; un token caducado es "identifícate otra vez" → 401.
+#
+# El `codigo` es lo que permite al interceptor del teléfono distinguir una
+# sesión RENOVABLE de una credencial que falta.
+#
+# Para reproducirlo: arrancar el servidor con DURACION_TOKEN=5s y esperar.
+GET {{host}}/usuarios/yo
+Authorization: Bearer {{token}}
+
+### --- Cerrar sesión: revoca las sesiones en el SERVIDOR -------------------
+# Cierra la limitación declarada en la Semana 12: hasta ahora cerrar sesión solo
+# borraba el token del teléfono y el servidor lo seguía aceptando.
+POST {{host}}/usuarios/salir
+Authorization: Bearer {{token}}
 
 ### --- Contraseña incorrecta → 401 con mensaje genérico -------------------
 POST {{host}}/usuarios/login

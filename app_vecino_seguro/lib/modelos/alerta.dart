@@ -1,6 +1,24 @@
+import 'package:json_annotation/json_annotation.dart';
+
+part 'alerta.g.dart';
+
 /// Modelo del recurso `Alerta` que devuelve `GET /api/alertas/comunidad`.
 ///
 /// Contrato derivado de `src/services/alerta.service.ts` y `prisma/schema.prisma`.
+///
+/// ## Serialización generada, con lectura defensiva
+///
+/// La conversión JSON↔objeto la genera `json_serializable` (`alerta.g.dart`).
+/// Cada `@JsonKey(name:)` documenta de forma explícita una divergencia de
+/// nomenclatura con el servidor: el backend habla `snake_case` y el cliente
+/// `camelCase`. Antes esa traducción estaba enterrada en un constructor escrito
+/// a mano donde nadie podía verla de un vistazo.
+///
+/// Los `fromJson:` por campo **no son decoración**. La generación estándar
+/// lanza excepción ante un tipo inesperado, y aquí eso significaría que **una
+/// sola alerta corrupta tumbaría el muro entero**. Cada campo degrada a un
+/// valor razonable y la lista sobrevive.
+@JsonSerializable()
 class Alerta {
   const Alerta({
     required this.idAlerta,
@@ -12,9 +30,16 @@ class Alerta {
     this.descripcion,
   });
 
+  @JsonKey(name: 'id_alerta', fromJson: _entero)
   final int idAlerta;
+
+  @JsonKey(name: 'tipo_alerta', fromJson: _tipo)
   final String tipoAlerta;
+
+  @JsonKey(name: 'fecha_hora', fromJson: _fecha, toJson: _fechaAJson)
   final DateTime fechaHora;
+
+  @JsonKey(fromJson: _estado)
   final String estado;
 
   /// Emitida por el gesto de pánico, sin que el vecino eligiera el tipo.
@@ -23,51 +48,75 @@ class Alerta {
   /// texto. Sin este campo, una alerta de pánico caía en la categoría genérica
   /// y se mostraba como urgencia media — la alerta más grave del sistema
   /// apareciendo como la menos alarmante.
+  @JsonKey(name: 'es_panico', fromJson: _booleano)
   final bool esPanico;
 
+  /// Opcional en el contrato del servidor, por tanto **anulable** aquí.
+  @JsonKey(fromJson: _textoOpcional)
   final String? descripcion;
 
-  /// Viene anidado en `usuario.nombre` gracias al eager loading del backend.
+  /// Divergencia **estructural**, no de nombre.
+  ///
+  /// El servidor no devuelve `nombre_vecino`: devuelve un objeto anidado
+  /// `usuario: { id_usuario, nombre, telefono }`, fruto del *eager loading*. El
+  /// cliente solo necesita el nombre, así que se aplana aquí en lugar de
+  /// arrastrar una clase `Usuario` que nadie más usaría.
+  @JsonKey(name: 'usuario', fromJson: _nombreDeUsuario, toJson: _usuarioDesdeNombre)
   final String nombreVecino;
 
   /// El backend solo devuelve alertas con estado "Activa", pero se compara
   /// igual: si mañana cambia el filtro, la UI no miente sobre la urgencia.
   bool get estaActiva => estado.toLowerCase() == 'activa';
 
-  factory Alerta.desdeJson(Map<String, dynamic> json) {
-    final usuario = json['usuario'] as Map<String, dynamic>?;
+  factory Alerta.fromJson(Map<String, dynamic> json) => _$AlertaFromJson(json);
 
-    return Alerta(
-      idAlerta: (json['id_alerta'] as num?)?.toInt() ?? 0,
-      tipoAlerta: (json['tipo_alerta'] as String?)?.trim().isNotEmpty == true
-          ? (json['tipo_alerta'] as String).trim()
-          : 'Alerta sin clasificar',
-      // Si la fecha viniera malformada, se degrada a "ahora" en lugar de
-      // tumbar toda la lista por un solo registro corrupto.
-      fechaHora:
-          DateTime.tryParse(json['fecha_hora'] as String? ?? '')?.toLocal() ??
-          DateTime.now(),
-      estado: json['estado'] as String? ?? 'Desconocido',
-      nombreVecino: (usuario?['nombre'] as String?) ?? 'Vecino anónimo',
-      esPanico: json['es_panico'] as bool? ?? false,
-      descripcion: (json['descripcion'] as String?)?.trim().isNotEmpty == true
-          ? (json['descripcion'] as String).trim()
-          : null,
-    );
+  Map<String, dynamic> toJson() => _$AlertaToJson(this);
+
+  /// Alias en español, para no reescribir las llamadas existentes.
+  factory Alerta.desdeJson(Map<String, dynamic> json) => Alerta.fromJson(json);
+
+  // --- Lectores defensivos --------------------------------------------------
+
+  static int _entero(Object? v) => (v as num?)?.toInt() ?? 0;
+
+  static bool _booleano(Object? v) => v as bool? ?? false;
+
+  static String _estado(Object? v) => v as String? ?? 'Desconocido';
+
+  static String _tipo(Object? v) {
+    final texto = (v as String?)?.trim();
+    return (texto == null || texto.isEmpty) ? 'Alerta sin clasificar' : texto;
   }
+
+  /// Si la fecha viniera malformada, se degrada a "ahora" en lugar de tumbar
+  /// toda la lista por un solo registro corrupto.
+  static DateTime _fecha(Object? v) =>
+      DateTime.tryParse(v as String? ?? '')?.toLocal() ?? DateTime.now();
+
+  static String _fechaAJson(DateTime f) => f.toUtc().toIso8601String();
+
+  static String? _textoOpcional(Object? v) {
+    final texto = (v as String?)?.trim();
+    return (texto == null || texto.isEmpty) ? null : texto;
+  }
+
+  static String _nombreDeUsuario(Object? v) {
+    if (v is Map && v['nombre'] is String) return v['nombre'] as String;
+    return 'Vecino anónimo';
+  }
+
+  static Map<String, dynamic> _usuarioDesdeNombre(String nombre) => {
+    'nombre': nombre,
+  };
 
   // ---------------------------------------------------------------------------
   // PERSISTENCIA LOCAL
   // ---------------------------------------------------------------------------
   //
-  // El mapeo a fila vive aquí, junto a `desdeJson`, y no dentro de la
-  // implementación de sqflite. Dos motivos:
-  //
-  // 1. Es simétrico: el modelo ya conoce el contrato de la API; conocer también
-  //    el de la tabla es la otra mitad de lo mismo.
-  // 2. Se puede probar sin sqlite. Si el mapeo viviera en la implementación
-  //    nativa, el único código que traduce una alerta a disco sería justo el que
-  //    las pruebas no pueden ejecutar.
+  // El mapeo a fila se escribe a mano y **no** se genera, a propósito: es el
+  // contrato con la base de datos del teléfono, no con la API. Generarlo desde
+  // las mismas anotaciones ataría el esquema del disco al del servidor, y un
+  // cambio de nombre en el backend obligaría a migrar la base local.
 
   /// Fila de la tabla `alertas`.
   ///
@@ -103,6 +152,10 @@ class Alerta {
 /// OJO: el arreglo viene **anidado** bajo `data`, no en la raíz. El campo
 /// `fuente` indica si la respuesta salió de caché o de PostgreSQL; es un dato
 /// de diagnóstico del backend, no de negocio.
+///
+/// No se genera su serialización: los campos [esLocal] y [sincronizadoEn] son
+/// del cliente y no existen en el contrato, así que una conversión automática
+/// produciría un JSON que el servidor no reconoce.
 class RespuestaAlertas {
   const RespuestaAlertas({
     required this.fuente,

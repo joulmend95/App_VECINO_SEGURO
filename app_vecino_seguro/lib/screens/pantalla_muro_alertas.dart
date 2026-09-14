@@ -1,14 +1,14 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import 'package:go_router/go_router.dart';
 
 import '../modelos/alerta.dart';
 import '../navegacion/rutas.dart';
-import '../servicios/almacen_local.dart';
 import '../servicios/cola_sincronizacion.dart';
-import '../servicios/cliente_api.dart';
+import '../dominio/fallo_api.dart';
 import '../servicios/dependencias.dart';
-import '../servicios/servicio_alertas.dart';
+import '../datos/repositorios/repositorio_alertas.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';
 import '../widgets/campo_texto.dart';
@@ -30,17 +30,17 @@ class PantallaMuroAlertas extends StatefulWidget {
 
   /// Inyectable para pruebas. En producción se toma el servicio compartido del
   /// árbol de dependencias, para que toda la app use una sola sesión.
-  final ServicioAlertas? api;
+  final RepositorioAlertas? api;
 
   @override
   State<PantallaMuroAlertas> createState() => _PantallaMuroAlertasState();
 }
 
 class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
-  ServicioAlertas? _apiInyectada;
+  RepositorioAlertas? _apiInyectada;
   late final TextEditingController _buscarCtrl;
 
-  ServicioAlertas get _api => _apiInyectada ?? context.servicios.alertas;
+  RepositorioAlertas get _api => _apiInyectada ?? context.servicios.alertas;
 
   /// Un único estado indivisible: no existe "cargando y con error a la vez".
   EstadoVista<List<Alerta>> _estado = const VistaCargando();
@@ -53,6 +53,9 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   /// Notificaciones sin leer, para el indicador de la barra superior.
   int _noLeidas = 0;
 
+  /// Cancela las peticiones en vuelo al abandonar el muro.
+  final _cancelacion = CancelToken();
+
   /// Cuánto hace que se guardaron estos datos. `null` ⇒ vienen del servidor.
   ///
   /// Es lo que decide si se muestra el aviso de datos desactualizados. Que sea
@@ -60,8 +63,12 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   /// de "datos frescos con antigüedad de 20 minutos".
   Duration? _antiguedad;
 
-  /// Alertas escritas sin conexión que todavía no llegaron al servidor.
-  List<OperacionPendiente> _pendientes = const [];
+  /// Cuántas alertas propias siguen sin llegar al servidor.
+  ///
+  /// Se guarda el **número**, no la lista: es lo único que la pantalla
+  /// necesita, y así la capa de estado no importa el tipo de la fuente local
+  /// ni sabe de dónde salen los datos.
+  int _pendientes = 0;
 
   /// Consulta el contador sin bloquear la pantalla: si falla, simplemente no
   /// se muestra el indicador. No merece un mensaje de error.
@@ -114,6 +121,9 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     //
     // El cliente HTTP NO se cierra aquí: es compartido por toda la app y lo
     // gestiona el contenedor de dependencias.
+    // Cancela lo que siga en vuelo. El vecino ya no está mirando: traer la
+    // respuesta solo gastaría sus datos móviles.
+    _cancelacion.cancel('El vecino salió del muro.');
     _cola?.removeListener(_alCambiarLaCola);
     _buscarCtrl.dispose();
     super.dispose();
@@ -124,7 +134,9 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     if (esRefresco) setState(() => _refrescando = true);
 
     try {
-      final respuesta = await _api.obtenerAlertasComunidad();
+      final respuesta = await _api.obtenerAlertasComunidad(
+        cancelacion: _cancelacion,
+      );
       if (!mounted) return;
       _todas = respuesta.alertas;
       // `esLocal` significa que el servidor no respondió y esto salió de la
@@ -139,6 +151,12 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       });
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
+
+      // Una cancelación NO es un fallo: el vecino se fue del muro, no falló
+      // nada. Pintarle un error de red por marcharse sería absurdo —y además
+      // quedaría ahí al volver.
+      if (e.fueCancelada) return;
+
       setState(() {
         _estado = VistaError(e.mensaje);
         _refrescando = false;
@@ -151,9 +169,9 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
   Future<void> _leerPendientes() async {
     if (_apiInyectada != null) return; // Pantalla montada suelta en pruebas.
     try {
-      _pendientes = await context.servicios.cola.pendientes();
+      _pendientes = (await context.servicios.cola.pendientes()).length;
     } catch (_) {
-      _pendientes = const [];
+      _pendientes = 0;
     }
   }
 
@@ -243,7 +261,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     // Cerrar sesión borra el almacén local entero, y eso incluye las alertas
     // que todavía no salieron del teléfono. Destruir una petición de auxilio en
     // silencio no es aceptable: si las hay, se dice antes de preguntar.
-    final pendientes = _pendientes.length;
+    final pendientes = _pendientes;
 
     final confirmado = await DialogoConfirmacion.mostrar(
       context,
@@ -267,6 +285,16 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     // borrado de la base local, el borrador y las preferencias; después notifica
     // y la guardia del enrutador lleva al ingreso sola. El servicio de push se
     // da de baja desde `main.dart`, que escucha el mismo cambio de sesión.
+    // Primero el servidor, luego el teléfono. El orden importa: revocar exige
+    // un token válido, y `cerrar()` lo borra. Al revés, la llamada saldría sin
+    // credencial y el servidor seguiría aceptando el token de renovación
+    // durante 30 días.
+    //
+    // `revocarEnServidor` nunca lanza: sin cobertura, el borrado local ocurre
+    // igual. Dejar la sesión abierta en el teléfono porque no había red sería
+    // lo contrario de lo que el vecino pidió.
+    await context.servicios.usuarios.revocarEnServidor();
+    if (!mounted) return;
     await context.sesion.cerrar();
   }
 
@@ -338,7 +366,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
             if (_antiguedad != null)
               _AvisoSinConexion(
                 antiguedad: _antiguedad!,
-                pendientes: _pendientes.length,
+                pendientes: _pendientes,
               ),
 
             // --- Buscador (componente del catálogo) ---

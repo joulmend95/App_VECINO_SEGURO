@@ -12,7 +12,7 @@ import 'package:app_vecino_seguro/screens/pantalla_muro_alertas.dart';
 import 'package:app_vecino_seguro/servicios/almacen_local.dart';
 import 'package:app_vecino_seguro/servicios/almacen_seguro.dart';
 import 'package:app_vecino_seguro/servicios/cliente_api.dart';
-import 'package:app_vecino_seguro/servicios/servicio_alertas.dart';
+import 'package:app_vecino_seguro/datos/repositorios/repositorio_alertas.dart';
 import 'package:app_vecino_seguro/servicios/sesion.dart';
 import 'package:app_vecino_seguro/widgets/tarjeta_alerta.dart';
 
@@ -24,8 +24,8 @@ void main() {
   MockClient sinRed() =>
       MockClient((_) async => throw const SocketException('modo avión'));
 
-  ServicioAlertas servicioCon(Sesion sesion, MockClient cliente, AlmacenLocal local) =>
-      ServicioAlertas(
+  RepositorioAlertas servicioCon(Sesion sesion, MockClient cliente, AlmacenLocal local) =>
+      RepositorioAlertas.desdeCliente(
         ClienteApi(sesion: sesion, cliente: cliente, urlBase: 'http://falso'),
         almacenLocal: local,
       );

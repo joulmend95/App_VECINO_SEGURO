@@ -97,9 +97,13 @@ void main() {
         tester,
         idAlerta: 42,
         rutas: {
+          // El interceptor reintenta los GET dos veces por su cuenta, así que
+          // hacen falta TRES fallos —original más los dos reintentos— para que
+          // el error llegue a la pantalla. Es la conducta deseada: un 500
+          // pasajero se recupera solo, sin que el vecino vea nada.
           'alertas/': (_) {
             intentos++;
-            return intentos == 1
+            return intentos <= 3
                 ? falla(500, 'error')
                 : ok(cuerpoAlerta(alertaJson(id: 42, tipo: 'Incendio')));
           },
@@ -107,12 +111,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('No pudimos cargar la información'), findsOneWidget);
+      expect(intentos, 3, reason: 'original + 2 reintentos automáticos');
 
       await tester.tap(find.widgetWithText(BotonAccion, 'Reintentar'));
       await tester.pumpAndSettle();
 
       expect(find.byType(TarjetaAlerta), findsOneWidget);
-      expect(intentos, 2);
+      expect(intentos, 4, reason: 'el reintento manual acierta a la primera');
     });
   });
 

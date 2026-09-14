@@ -30,6 +30,10 @@ class Sesion extends ChangeNotifier {
 
   static const _claveToken = 'vecino_seguro.token';
 
+  /// Debe coincidir con `Credenciales.claveRenovacion`: el interceptor lee de
+  /// ahí para renovar sin pasar por esta clase.
+  static const _claveRenovacion = 'vecino_seguro.token_renovacion';
+
   /// Perfil del vecino, guardado **cifrado**.
   ///
   /// Lleva nombre y teléfono: es dato personal, así que no puede vivir en
@@ -37,6 +41,15 @@ class Sesion extends ChangeNotifier {
   static const _clavePerfil = 'vecino_seguro.perfil';
 
   final AlmacenSeguro _almacen;
+
+  /// Almacén cifrado subyacente.
+  ///
+  /// Lo expone para que la capa de red lea el token de ahí —como exige el
+  /// enunciado— sin tener que depender de `Sesion` entera. Un interceptor solo
+  /// necesita dos cadenas; acoplarlo al `ChangeNotifier`, al perfil y al ciclo
+  /// de vida de la sesión crearía además una dependencia circular, porque
+  /// `Sesion` necesita el cliente HTTP para pedir el perfil.
+  AlmacenSeguro get almacen => _almacen;
 
   /// Se ejecuta al cerrar sesión, antes de notificar.
   ///
@@ -96,11 +109,26 @@ class Sesion extends ChangeNotifier {
   }
 
   /// Abre sesión tras un ingreso o registro exitoso.
-  Future<void> iniciar({required String token, required PerfilVecino perfil}) async {
+  Future<void> iniciar({
+    required String token,
+    required PerfilVecino perfil,
+    String? tokenRenovacion,
+  }) async {
     _token = token;
     _perfil = perfil;
     _fase = FaseSesion.autenticado;
     await _almacen.escribir(_claveToken, token);
+
+    // El token de renovación vale tanto como la contraseña: con él se obtienen
+    // tokens de acceso nuevos durante 30 días. Va al almacén cifrado, junto al
+    // de acceso, y se borra en el mismo `borrarTodo()` al cerrar sesión.
+    //
+    // Es opcional porque las pruebas —y cualquier cliente contra un servidor
+    // anterior a esta semana— siguen abriendo sesión solo con el de acceso.
+    if (tokenRenovacion != null && tokenRenovacion.isNotEmpty) {
+      await _almacen.escribir(_claveRenovacion, tokenRenovacion);
+    }
+
     await _guardarPerfil(perfil);
     notifyListeners();
   }

@@ -1,17 +1,34 @@
+import 'package:flutter/foundation.dart';
+
 import '../modelos/perfil_vecino.dart';
 import 'cliente_api.dart';
 import 'sesion.dart';
 
 /// Resultado de un ingreso o registro: token + perfil.
 class ResultadoAutenticacion {
-  const ResultadoAutenticacion({required this.token, required this.perfil});
+  const ResultadoAutenticacion({
+    required this.token,
+    required this.perfil,
+    this.tokenRenovacion,
+  });
 
+  /// Token de **acceso**. Dura 15 minutos y viaja en cada petición.
   final String token;
+
+  /// Token de **renovación**. Dura 30 días y sirve para pedir accesos nuevos
+  /// sin volver a escribir la contraseña.
+  ///
+  /// Anulable porque el contrato lo permite: un servidor anterior a esta semana
+  /// no lo devuelve, y la app debe seguir funcionando —solo que sin renovación
+  /// automática— en lugar de romperse al ingresar.
+  final String? tokenRenovacion;
+
   final PerfilVecino perfil;
 
   factory ResultadoAutenticacion.desdeJson(Map<String, dynamic> json) {
     return ResultadoAutenticacion(
       token: json['token'] as String? ?? '',
+      tokenRenovacion: json['token_renovacion'] as String?,
       perfil: PerfilVecino.desdeJson(
         (json['perfil'] as Map<String, dynamic>?) ?? const {},
       ),
@@ -105,6 +122,24 @@ class ServicioUsuarios {
     );
   }
 
+  /// `POST /api/usuarios/salir` — revoca las sesiones en el **servidor**.
+  ///
+  /// Hasta esta semana, cerrar sesión solo borraba el token del teléfono y el
+  /// servidor lo seguía aceptando hasta que caducara. Era la limitación
+  /// declarada en la Semana 12; esta llamada la cierra.
+  ///
+  /// **Nunca propaga el error.** Si el servidor no responde, el borrado local
+  /// debe ocurrir igual: dejar al vecino con la sesión abierta en el teléfono
+  /// porque no había cobertura sería exactamente lo contrario de lo que pidió.
+  /// El token de renovación caducará solo a los 30 días.
+  Future<void> revocarEnServidor() async {
+    try {
+      await _api.publicar('/api/usuarios/salir');
+    } on ExcepcionApi catch (e) {
+      debugPrint('[SESION] No se pudo revocar en el servidor: ${e.mensaje}');
+    }
+  }
+
   Future<PerfilVecino> _abrirSesion(Map<String, dynamic> json) async {
     final resultado = ResultadoAutenticacion.desdeJson(json);
 
@@ -115,7 +150,13 @@ class ServicioUsuarios {
       );
     }
 
-    await _sesion.iniciar(token: resultado.token, perfil: resultado.perfil);
+    await _sesion.iniciar(
+      token: resultado.token,
+      perfil: resultado.perfil,
+      // Sin guardar esto, el interceptor de renovación no tendría con qué
+      // renovar y el vecino sería expulsado al ingreso a los 15 minutos.
+      tokenRenovacion: resultado.tokenRenovacion,
+    );
     return resultado.perfil;
   }
 }

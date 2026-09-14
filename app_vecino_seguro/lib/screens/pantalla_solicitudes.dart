@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../modelos/solicitud.dart';
 import '../navegacion/rutas.dart';
-import '../servicios/cliente_api.dart';
+import '../dominio/fallo_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';

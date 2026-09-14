@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as usuarioService from '../services/usuario.service';
 import { CredencialesInvalidas, ConflictoDatos } from '../services/usuario.service';
+import * as renovacionService from '../services/renovacion.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
 /**
@@ -140,5 +141,60 @@ export const generarTokenPruebaController = async (req: Request, res: Response):
         res.status(200).json(resultado);
     } catch (error: any) {
         res.status(400).json({ mensaje: error?.message ?? 'No se pudo generar el token.' });
+    }
+};
+
+/**
+ * POST /api/usuarios/renovar
+ *
+ * Canjea un token de renovación por un par nuevo. Es el endpoint que hace
+ * transparente la expiración del token de acceso: el teléfono lo llama solo,
+ * desde su interceptor, sin que el vecino se entere.
+ *
+ * **No lleva `verificarAutenticacion` a propósito.** Se llama precisamente
+ * cuando el token de acceso ya caducó; exigir uno válido haría el endpoint
+ * inalcanzable justo cuando hace falta. La credencial aquí es el propio token
+ * de renovación.
+ */
+export const renovarController = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { token_renovacion } = req.body ?? {};
+        const par = await renovacionService.renovar(token_renovacion);
+
+        res.status(200).json({ mensaje: 'Sesión renovada.', ...par });
+    } catch (error) {
+        if (error instanceof renovacionService.RenovacionInvalida) {
+            // 401 y no 403: la credencial de renovación ya no sirve y hay que
+            // volver a ingresar. El cliente lo distingue por el código.
+            res.status(401).json({
+                mensaje: error.message,
+                codigo: 'RENOVACION_INVALIDA',
+            });
+            return;
+        }
+        console.error('[renovar]', error);
+        res.status(500).json({ mensaje: 'No pudimos renovar tu sesión.' });
+    }
+};
+
+/**
+ * POST /api/usuarios/salir
+ *
+ * Revoca todas las sesiones del vecino en el servidor.
+ *
+ * Hasta ahora cerrar sesión solo borraba el token del teléfono y el servidor
+ * lo seguía aceptando hasta que caducara. Era la limitación declarada en la
+ * Semana 12; este endpoint la cierra.
+ */
+export const cerrarSesionController = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const revocados = await renovacionService.revocarTodos(req.user!.id_usuario);
+        res.status(200).json({
+            mensaje: 'Sesión cerrada.',
+            sesiones_revocadas: revocados,
+        });
+    } catch (error) {
+        console.error('[cerrarSesion]', error);
+        res.status(500).json({ mensaje: 'No pudimos cerrar la sesión en el servidor.' });
     }
 };

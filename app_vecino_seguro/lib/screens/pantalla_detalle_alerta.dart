@@ -1,7 +1,8 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../modelos/alerta.dart';
-import '../servicios/cliente_api.dart';
+import '../dominio/fallo_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/categoria_alerta.dart';
@@ -36,6 +37,14 @@ class PantallaDetalleAlerta extends StatefulWidget {
 class _PantallaDetalleAlertaState extends State<PantallaDetalleAlerta> {
   EstadoVista<Alerta> _estado = const VistaCargando();
 
+  /// Cancela la petición en vuelo si el vecino se va antes de que llegue.
+  ///
+  /// Evita dos cosas reales: gastar datos móviles trayendo una respuesta que
+  /// nadie va a mirar, y que el `setState` posterior se apoye solo en la
+  /// guardia `if (!mounted)` para no explotar. Cancelar es cortar el problema
+  /// de raíz en lugar de esquivarlo al final.
+  final _cancelacion = CancelToken();
+
   @override
   void initState() {
     super.initState();
@@ -58,13 +67,27 @@ class _PantallaDetalleAlertaState extends State<PantallaDetalleAlerta> {
     setState(() => _estado = const VistaCargando());
 
     try {
-      final alerta = await context.servicios.alertas.obtenerPorId(widget.idAlerta);
+      final alerta = await context.servicios.alertas.obtenerPorId(
+        widget.idAlerta,
+        cancelacion: _cancelacion,
+      );
       if (!mounted) return;
       setState(() => _estado = VistaConDatos(alerta));
     } on ExcepcionApi catch (e) {
       if (!mounted) return;
+
+      // Una cancelación NO es un fallo: el vecino se fue de la pantalla, no
+      // falló nada. Mostrarle un error por irse sería absurdo.
+      if (e.fueCancelada) return;
+
       setState(() => _estado = VistaError(e.mensaje));
     }
+  }
+
+  @override
+  void dispose() {
+    _cancelacion.cancel('El vecino salió de la pantalla de detalle.');
+    super.dispose();
   }
 
   @override

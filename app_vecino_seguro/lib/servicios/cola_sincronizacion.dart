@@ -5,7 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import 'almacen_local.dart';
 import 'cliente_api.dart';
-import 'servicio_alertas.dart';
+import '../datos/repositorios/repositorio_alertas.dart';
 
 /// Resultado de una pasada de sincronización.
 class ResultadoSincronizacion {
@@ -65,7 +65,7 @@ class ColaSincronizacion extends ChangeNotifier {
   }) : _uuid = generador ?? const Uuid();
 
   final AlmacenLocal almacen;
-  final ServicioAlertas alertas;
+  final RepositorioAlertas alertas;
   final Uuid _uuid;
 
   /// Espera base de la progresión. Los reintentos van a 5, 10, 20, 40 y 80 s.

@@ -1,10 +1,13 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:http/http.dart' as http;
 
+import '../config/entorno.dart';
+import '../red/adaptador_pruebas.dart';
+import '../red/cliente_http.dart';
+import '../red/credenciales.dart';
+import '../red/fallos_de_red.dart';
 import 'sesion.dart';
 
 /// Error de API ya traducido a un mensaje que se le puede mostrar al usuario.
@@ -51,8 +54,8 @@ class ExcepcionApi implements Exception {
   /// 429: el servidor limita a una alerta por vecino cada 60 segundos.
   ///
   /// Existe como código para que nadie tenga que deducirlo del texto del
-  /// mensaje. `ColaPanico` lo hacía con `e.mensaje.contains('Espera')`, que
-  /// dependía de una cadena en español: cambiar la redacción del servidor
+  /// mensaje. La antigua cola de pánico lo hacía con `e.mensaje.contains(...)`,
+  /// que dependía de una cadena en español: cambiar la redacción del servidor
   /// habría roto silenciosamente la lógica de reintento.
   static const limiteFrecuencia = 'LIMITE_FRECUENCIA';
 
@@ -78,151 +81,134 @@ class ExcepcionApi implements Exception {
   /// El servidor pide esperar (429). No es un rechazo: es un "ahora no".
   bool get esLimiteDeFrecuencia => codigo == limiteFrecuencia;
 
+  /// El vecino abandonó la pantalla. **No es un fallo** y no se muestra.
+  bool get fueCancelada => codigo == FallosDeRed.cancelada;
+
   @override
   String toString() => mensaje;
 }
 
 /// Cliente HTTP único de la aplicación.
 ///
-/// Responsabilidades que concentra para que ninguna pantalla las repita:
-/// - Adjuntar el `Authorization: Bearer` de la sesión activa.
-/// - Traducir fallos de red y códigos HTTP a [ExcepcionApi].
-/// - **Cerrar la sesión ante un 401/403** y avisar a la app, de modo que el
+/// ## Por qué Dio y no `http`
+///
+/// El paquete `http` es un cliente de peticiones; lo que este proyecto necesita
+/// es una **capa de transporte con política propia**: inyectar credenciales,
+/// renovarlas de forma transparente, registrar sin filtrar secretos, cancelar
+/// al abandonar una pantalla y distinguir cuatro clases de fallo de red. Con
+/// `http` todo eso habría que escribirlo a mano alrededor de cada llamada.
+///
+/// Dio lo trae resuelto y probado: cadena de interceptores con orden explícito,
+/// `QueuedInterceptor` para serializar renovaciones, `connectTimeout` y
+/// `receiveTimeout` separados, `validateStatus` y `CancelToken`.
+///
+/// Con 14 endpoints y un esquema de token con renovación, escribir esa
+/// maquinaria a mano habría sido más código propio —y más frágil— que la
+/// dependencia.
+///
+/// ## Qué concentra
+///
+/// - Traducir respuestas y fallos de red a [ExcepcionApi].
+/// - **Cerrar la sesión** cuando ya no se puede renovar, de modo que el
 ///   enrutador redirija al ingreso sin que cada pantalla lo gestione.
+///
+/// La inyección del token y la renovación viven en los interceptores, no aquí.
 class ClienteApi {
   ClienteApi({
     required this.sesion,
     http.Client? cliente,
     String? urlBase,
-  }) : _cliente = cliente ?? http.Client(),
-       urlBase = urlBase ?? urlBasePorDefecto;
+  }) : urlBase = urlBase ?? Entorno.urlBase {
+    _dio = construirCliente(
+      credenciales: Credenciales(sesion.almacen),
+      alPerderSesion: sesion.cerrar,
+      // En pruebas se inyecta un `http.Client` simulado: se envuelve en el
+      // adaptador para que Dio hable con él. Ver `AdaptadorDeCliente`.
+      adaptador: cliente == null ? null : AdaptadorDeCliente(cliente),
+    );
+    if (urlBase != null) _dio.options.baseUrl = urlBase;
+  }
 
   final Sesion sesion;
   final String urlBase;
-  final http.Client _cliente;
+  late final Dio _dio;
 
-  static const _tiempoLimite = Duration(seconds: 12);
+  /// Acceso al cliente subyacente. Lo usan las fuentes remotas para pasar un
+  /// `CancelToken`; ninguna pantalla lo toca.
+  Dio get dio => _dio;
 
-  /// El emulador de Android no ve `localhost` del anfitrión: lo alcanza por la
-  /// IP especial 10.0.2.2. En escritorio y web sí es `localhost`.
-  static String get urlBasePorDefecto {
-    const puerto = 3333;
-    if (kIsWeb) return 'http://localhost:$puerto';
-    if (Platform.isAndroid) return 'http://10.0.2.2:$puerto';
-    return 'http://localhost:$puerto';
-  }
+  /// Dirección de desarrollo. Se conserva por compatibilidad; la fuente de
+  /// verdad es [Entorno.urlBase].
+  static String get urlBasePorDefecto => Entorno.urlBase;
 
-  Map<String, String> _cabeceras() {
-    final token = sesion.token;
-    return {
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
-  }
-
-  Future<Map<String, dynamic>> obtener(String ruta) =>
-      _ejecutar(() => _cliente.get(_uri(ruta), headers: _cabeceras()));
+  Future<Map<String, dynamic>> obtener(
+    String ruta, {
+    CancelToken? cancelacion,
+  }) => _ejecutar(() => _dio.get(ruta, cancelToken: cancelacion));
 
   Future<Map<String, dynamic>> publicar(
     String ruta, {
     Map<String, dynamic>? cuerpo,
+    CancelToken? cancelacion,
   }) => _ejecutar(
-    () => _cliente.post(
-      _uri(ruta),
-      headers: _cabeceras(),
-      body: jsonEncode(cuerpo ?? const {}),
-    ),
+    () => _dio.post(ruta, data: cuerpo ?? const {}, cancelToken: cancelacion),
   );
 
   Future<Map<String, dynamic>> parchear(
     String ruta, {
     Map<String, dynamic>? cuerpo,
+    CancelToken? cancelacion,
   }) => _ejecutar(
-    () => _cliente.patch(
-      _uri(ruta),
-      headers: _cabeceras(),
-      body: jsonEncode(cuerpo ?? const {}),
-    ),
+    () => _dio.patch(ruta, data: cuerpo ?? const {}, cancelToken: cancelacion),
   );
 
   Future<Map<String, dynamic>> eliminar(
     String ruta, {
     Map<String, dynamic>? cuerpo,
+    CancelToken? cancelacion,
   }) => _ejecutar(
-    () => _cliente.delete(
-      _uri(ruta),
-      headers: _cabeceras(),
-      body: cuerpo == null ? null : jsonEncode(cuerpo),
-    ),
+    () => _dio.delete(ruta, data: cuerpo, cancelToken: cancelacion),
   );
 
-  Uri _uri(String ruta) => Uri.parse('$urlBase$ruta');
-
   Future<Map<String, dynamic>> _ejecutar(
-    Future<http.Response> Function() peticion,
+    Future<Response<dynamic>> Function() peticion,
   ) async {
-    final http.Response respuesta;
+    final Response<dynamic> respuesta;
     try {
-      respuesta = await peticion().timeout(_tiempoLimite);
-    } on TimeoutException {
-      // Los tres fallos de transporte llevan el mismo código. Sin él, "no hay
-      // red" era indistinguible de "el servidor respondió 500", y eso importa:
-      // ante un fallo de red tiene sentido servir la caché local y conservar la
-      // operación en la cola; ante un 500 del servidor, no.
-      throw const ExcepcionApi(
-        'El servidor tardó demasiado en responder. Revisa tu conexión.',
-        codigo: ExcepcionApi.sinConexion,
-      );
-    } on SocketException {
-      // La URL del servidor va al registro de depuración, NO al mensaje: a un
-      // vecino no le dice nada que el backend viva en 10.0.2.2:3333, y además
-      // expone detalle interno de la infraestructura. Aquí sigue disponible
-      // para quien desarrolla, que es a quien le sirve.
-      debugPrint('[API] Sin conexión con $urlBase');
-      throw const ExcepcionApi(
-        'No pudimos conectarnos.\nComprueba tu conexión a internet.',
-        codigo: ExcepcionApi.sinConexion,
-      );
-    } on http.ClientException {
-      throw const ExcepcionApi(
-        'Se interrumpió la comunicación con el servidor.',
-        codigo: ExcepcionApi.sinConexion,
-      );
+      respuesta = await peticion();
+    } on DioException catch (e) {
+      // Las cuatro familias de fallo de red, más la cancelación.
+      throw FallosDeRed.traducir(e, urlBase);
     }
 
     return _interpretar(respuesta);
   }
 
-  Future<Map<String, dynamic>> _interpretar(http.Response respuesta) async {
-    Map<String, dynamic> cuerpo = const {};
-    if (respuesta.body.isNotEmpty) {
-      try {
-        final decodificado = jsonDecode(respuesta.body);
-        if (decodificado is Map<String, dynamic>) cuerpo = decodificado;
-      } on FormatException {
-        // Se ignora: algunos errores del servidor no devuelven JSON. El código
-        // de estado sigue siendo suficiente para decidir qué hacer.
-      }
-    }
+  /// Convierte la respuesta en datos o en [ExcepcionApi].
+  ///
+  /// Los 4xx llegan aquí como **respuesta**, no como excepción, porque
+  /// `validateStatus` acepta todo por debajo de 500. Es lo que permite leer el
+  /// cuerpo de un 422 y repartir sus errores campo por campo.
+  Future<Map<String, dynamic>> _interpretar(Response<dynamic> respuesta) async {
+    final cuerpo = _comoMapa(respuesta.data);
 
-    final codigo = respuesta.statusCode;
-
+    final codigo = respuesta.statusCode ?? 0;
     if (codigo >= 200 && codigo < 300) return cuerpo;
 
     final mensaje = cuerpo['mensaje'] as String?;
+    final codigoNegocio = cuerpo['codigo'] as String?;
 
     // --- Rechazos de acceso: 401 y 403 NO significan lo mismo --------------
     //
     // Se resuelven aquí, en un solo lugar. Sin esto, cada pantalla tendría que
     // detectarlos y navegar por su cuenta, y la que se olvidara dejaría al
     // usuario atrapado en una pantalla que ya no carga.
-    final codigoNegocio = cuerpo['codigo'] as String?;
-
-    // 401 — no se envió credencial. La sesión local ya no sirve, pero el
-    // destino al que iba sigue siendo válido: la guardia lo recuerda en
-    // `?destino=` y lo devuelve ahí en cuanto vuelva a ingresar.
     if (codigo == 401) {
-      await sesion.cerrar();
+      // Un `TOKEN_EXPIRADO` que llega hasta aquí significa que el interceptor
+      // de renovación ya lo intentó y no pudo: la sesión está perdida de
+      // verdad y él mismo se encargó de cerrarla.
+      if (codigoNegocio != 'TOKEN_EXPIRADO') await sesion.cerrar();
+
       throw ExcepcionApi(
         mensaje ?? 'Se requiere iniciar sesión.',
         codigo: ExcepcionApi.sesionRequerida,
@@ -230,11 +216,10 @@ class ClienteApi {
       );
     }
 
-    // 403 sin código de negocio — el token existe pero el servidor lo rechaza:
-    // firma inválida, caducado, o la cuenta ya no está. Se cierra sesión igual
-    // que en el 401, pero se marca distinto para que la guardia NO conserve el
-    // destino: si la credencial dejó de ser de fiar, tampoco lo es el rastro
-    // de a dónde iba.
+    // 403 sin código de negocio — el token no es válido: firma manipulada o
+    // cuenta eliminada. Se cierra sesión, pero se marca distinto para que la
+    // guardia NO conserve el destino: si la credencial dejó de ser de fiar,
+    // tampoco lo es el rastro de a dónde iba.
     if (codigo == 403 && codigoNegocio == null) {
       await sesion.cerrar();
       throw ExcepcionApi(
@@ -244,11 +229,10 @@ class ClienteApi {
       );
     }
 
-    // 403 CON código de negocio (SIN_COMUNIDAD, NO_ES_ADMIN) no llega a las
-    // ramas anteriores a propósito: el vecino está perfectamente autenticado,
+    // 403 CON código de negocio (SIN_COMUNIDAD, NO_ES_ADMIN) no llega a la
+    // rama anterior a propósito: el vecino está perfectamente autenticado,
     // solo le falta pertenencia o permisos. Cerrar sesión ahí sería expulsarlo
-    // por un cambio de rol. Cae al final del método, con su `codigo` intacto,
-    // y la pantalla decide (ver `PantallaSinPermiso`).
+    // por un cambio de rol. Cae al final, con su `codigo` intacto.
 
     // 422 — la petición está bien formada y el contenido de los campos no.
     // 400 — dato correcto, operación improcedente (un :id inválido, la
@@ -280,6 +264,30 @@ class ClienteApi {
     );
   }
 
+  /// Normaliza el cuerpo de la respuesta a mapa.
+  ///
+  /// Dio solo convierte a JSON cuando la respuesta declara `content-type:
+  /// application/json`. Un servidor que devuelve JSON sin esa cabecera —cosa
+  /// frecuente en respuestas de error— dejaría el cuerpo como texto, y todos
+  /// los campos se leerían como ausentes: el vecino vería una lista vacía en
+  /// lugar de sus alertas, sin ningún error que lo delatara.
+  ///
+  /// Se intenta interpretar el texto antes de darlo por perdido.
+  static Map<String, dynamic> _comoMapa(Object? crudo) {
+    if (crudo is Map<String, dynamic>) return crudo;
+
+    if (crudo is String && crudo.isNotEmpty) {
+      try {
+        final decodificado = jsonDecode(crudo);
+        if (decodificado is Map<String, dynamic>) return decodificado;
+      } on FormatException {
+        // No era JSON. El código de estado sigue bastando para decidir.
+      }
+    }
+
+    return const <String, dynamic>{};
+  }
+
   /// Convierte `[{campo, mensaje}]` en `{campo: mensaje}`.
   static Map<String, String> _extraerErrores(Map<String, dynamic> cuerpo) {
     final lista = cuerpo['errores'];
@@ -292,5 +300,5 @@ class ClienteApi {
     };
   }
 
-  void cerrar() => _cliente.close();
+  void cerrar() => _dio.close();
 }

@@ -7,7 +7,7 @@ import 'borrador_alerta.dart';
 import 'cliente_api.dart';
 import 'cola_sincronizacion.dart';
 import 'detector_conexion.dart';
-import 'servicio_alertas.dart';
+import '../datos/repositorios/repositorio_alertas.dart';
 import 'servicio_comunidades.dart';
 import 'servicio_notificaciones.dart';
 import 'servicio_panico.dart';
@@ -35,7 +35,7 @@ class Servicios {
        conexion = detector ?? DetectorConexionReal() {
     usuarios = ServicioUsuarios(api);
     comunidades = ServicioComunidades(api);
-    alertas = ServicioAlertas(api, almacenLocal: local);
+    alertas = RepositorioAlertas.desdeCliente(api, almacenLocal: local);
     notificaciones = ServicioNotificaciones(api);
     panico = ServicioPanico();
     cola = ColaSincronizacion(almacen: local, alertas: alertas);
@@ -53,7 +53,7 @@ class Servicios {
 
   late final ServicioUsuarios usuarios;
   late final ServicioComunidades comunidades;
-  late final ServicioAlertas alertas;
+  late final RepositorioAlertas alertas;
   late final ServicioNotificaciones notificaciones;
   late final ServicioPanico panico;
 

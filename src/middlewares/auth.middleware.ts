@@ -96,8 +96,28 @@ export const verificarAutenticacion = async (
             return;
         }
         idUsuario = payload.id_usuario;
-    } catch {
-        res.status(403).json({ mensaje: 'Tu sesión expiró. Vuelve a ingresar.' });
+    } catch (error: any) {
+        // --- Token caducado: 401, NO 403 -----------------------------------
+        //
+        // Este era un 403 y estaba mal. Según RFC 9110 §15.5.4, un 403 significa
+        // "te identifiqué y aun así no puedes"; un token caducado es
+        // "identifícate otra vez", que es exactamente el 401 (§15.5.2).
+        //
+        // La diferencia no es académica: el interceptor de renovación del
+        // teléfono reacciona al 401 y usa este `codigo` para saber que la
+        // sesión es RENOVABLE y no hay que expulsar al vecino. Con un 403, la
+        // renovación automática sería imposible de disparar.
+        if (error?.name === 'TokenExpiredError') {
+            res.status(401).json({
+                mensaje: 'Tu sesión expiró.',
+                codigo: 'TOKEN_EXPIRADO',
+            });
+            return;
+        }
+
+        // Firma inválida o token manipulado: aquí sí es 403. No es que haya
+        // caducado, es que nunca fue nuestro, y renovarlo no tiene sentido.
+        res.status(403).json({ mensaje: 'Token inválido.' });
         return;
     }
 

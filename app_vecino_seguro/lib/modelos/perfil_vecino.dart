@@ -1,3 +1,7 @@
+import 'package:json_annotation/json_annotation.dart';
+
+part 'perfil_vecino.g.dart';
+
 /// Estado de pertenencia del vecino a una comunidad.
 ///
 /// Es lo que decide a qué pantalla entra la app al arrancar. Se modela como
@@ -31,6 +35,7 @@ enum EstadoMembresia {
 }
 
 /// Comunidad a la que pertenece el vecino.
+@JsonSerializable()
 class ComunidadDelVecino {
   const ComunidadDelVecino({
     required this.idComunidad,
@@ -39,33 +44,38 @@ class ComunidadDelVecino {
     required this.esAdmin,
   });
 
+  @JsonKey(name: 'id_comunidad', fromJson: _entero)
   final int idComunidad;
+
+  @JsonKey(fromJson: _nombreComunidad)
   final String nombre;
 
   /// Código que el administrador comparte para que otros soliciten unirse.
+  @JsonKey(fromJson: _texto)
   final String codigo;
 
   /// `true` si este vecino es quien la creó y aprueba las solicitudes.
+  @JsonKey(name: 'es_admin', fromJson: _booleano)
   final bool esAdmin;
 
-  factory ComunidadDelVecino.desdeJson(Map<String, dynamic> json) {
-    return ComunidadDelVecino(
-      idComunidad: (json['id_comunidad'] as num?)?.toInt() ?? 0,
-      nombre: json['nombre'] as String? ?? 'Mi comunidad',
-      codigo: json['codigo'] as String? ?? '',
-      esAdmin: json['es_admin'] as bool? ?? false,
-    );
-  }
+  factory ComunidadDelVecino.fromJson(Map<String, dynamic> json) =>
+      _$ComunidadDelVecinoFromJson(json);
 
-  Map<String, dynamic> aJson() => {
-    'id_comunidad': idComunidad,
-    'nombre': nombre,
-    'codigo': codigo,
-    'es_admin': esAdmin,
-  };
+  Map<String, dynamic> toJson() => _$ComunidadDelVecinoToJson(this);
+
+  factory ComunidadDelVecino.desdeJson(Map<String, dynamic> json) =>
+      ComunidadDelVecino.fromJson(json);
+
+  Map<String, dynamic> aJson() => toJson();
+
+  static int _entero(Object? v) => (v as num?)?.toInt() ?? 0;
+  static bool _booleano(Object? v) => v as bool? ?? false;
+  static String _texto(Object? v) => v as String? ?? '';
+  static String _nombreComunidad(Object? v) => v as String? ?? 'Mi comunidad';
 }
 
 /// Solicitud de ingreso pendiente de resolución.
+@JsonSerializable()
 class SolicitudPendiente {
   const SolicitudPendiente({
     required this.idSolicitud,
@@ -73,30 +83,47 @@ class SolicitudPendiente {
     required this.fechaSolicitud,
   });
 
+  @JsonKey(name: 'id_solicitud', fromJson: _entero)
   final int idSolicitud;
+
+  @JsonKey(fromJson: _texto)
   final String comunidad;
+
+  @JsonKey(name: 'fecha_solicitud', fromJson: _fecha, toJson: _fechaAJson)
   final DateTime fechaSolicitud;
 
-  factory SolicitudPendiente.desdeJson(Map<String, dynamic> json) {
-    return SolicitudPendiente(
-      idSolicitud: (json['id_solicitud'] as num?)?.toInt() ?? 0,
-      comunidad: json['comunidad'] as String? ?? '',
-      fechaSolicitud:
-          DateTime.tryParse(json['fecha_solicitud'] as String? ?? '')?.toLocal() ??
-          DateTime.now(),
-    );
-  }
+  factory SolicitudPendiente.fromJson(Map<String, dynamic> json) =>
+      _$SolicitudPendienteFromJson(json);
 
-  Map<String, dynamic> aJson() => {
-    'id_solicitud': idSolicitud,
-    'comunidad': comunidad,
-    'fecha_solicitud': fechaSolicitud.toUtc().toIso8601String(),
-  };
+  Map<String, dynamic> toJson() => _$SolicitudPendienteToJson(this);
+
+  factory SolicitudPendiente.desdeJson(Map<String, dynamic> json) =>
+      SolicitudPendiente.fromJson(json);
+
+  Map<String, dynamic> aJson() => toJson();
+
+  static int _entero(Object? v) => (v as num?)?.toInt() ?? 0;
+  static String _texto(Object? v) => v as String? ?? '';
+  static DateTime _fecha(Object? v) =>
+      DateTime.tryParse(v as String? ?? '')?.toLocal() ?? DateTime.now();
+  static String _fechaAJson(DateTime f) => f.toUtc().toIso8601String();
 }
 
 /// Perfil del vecino autenticado.
 ///
 /// Contrato de `GET /api/usuarios/yo`.
+///
+/// ## Serialización generada
+///
+/// La conversión la genera `json_serializable`. Cada `@JsonKey(name:)` deja
+/// escrita la divergencia entre el `snake_case` del servidor y el `camelCase`
+/// del cliente, en lugar de esconderla en un constructor a mano.
+///
+/// [comunidad] y [solicitudPendiente] son **anulables** porque el contrato los
+/// declara opcionales: un vecino recién registrado no tiene ninguna de las dos,
+/// y uno activo no tiene solicitud pendiente. Marcarlos obligatorios obligaría
+/// a inventar objetos vacíos que después habría que distinguir de los reales.
+@JsonSerializable(explicitToJson: true)
 class PerfilVecino {
   const PerfilVecino({
     required this.idUsuario,
@@ -107,11 +134,28 @@ class PerfilVecino {
     this.solicitudPendiente,
   });
 
+  @JsonKey(name: 'id_usuario', fromJson: _entero)
   final int idUsuario;
+
+  @JsonKey(fromJson: _nombrePersona)
   final String nombre;
+
+  @JsonKey(fromJson: _texto)
   final String telefono;
+
+  /// El servidor manda `"ACTIVO"`, `"PENDIENTE"` o `"SIN_COMUNIDAD"`; aquí es
+  /// un `enum`. La traducción va en ambos sentidos para que el perfil guardado
+  /// en caché se relea con su membresía intacta.
+  @JsonKey(
+    name: 'estado_membresia',
+    fromJson: EstadoMembresia.desdeApi,
+    toJson: _membresiaAJson,
+  )
   final EstadoMembresia estadoMembresia;
+
   final ComunidadDelVecino? comunidad;
+
+  @JsonKey(name: 'solicitud_pendiente')
   final SolicitudPendiente? solicitudPendiente;
 
   /// Puede ver y emitir alertas.
@@ -120,40 +164,26 @@ class PerfilVecino {
   /// Administra su comunidad y aprueba solicitudes.
   bool get esAdmin => comunidad?.esAdmin ?? false;
 
-  factory PerfilVecino.desdeJson(Map<String, dynamic> json) {
-    final comunidad = json['comunidad'];
-    final solicitud = json['solicitud_pendiente'];
+  factory PerfilVecino.fromJson(Map<String, dynamic> json) =>
+      _$PerfilVecinoFromJson(json);
 
-    return PerfilVecino(
-      idUsuario: (json['id_usuario'] as num?)?.toInt() ?? 0,
-      nombre: json['nombre'] as String? ?? 'Vecino',
-      telefono: json['telefono'] as String? ?? '',
-      estadoMembresia: EstadoMembresia.desdeApi(json['estado_membresia'] as String?),
-      comunidad: comunidad is Map<String, dynamic>
-          ? ComunidadDelVecino.desdeJson(comunidad)
-          : null,
-      solicitudPendiente: solicitud is Map<String, dynamic>
-          ? SolicitudPendiente.desdeJson(solicitud)
-          : null,
-    );
-  }
-
-  /// Serializa el perfil para guardarlo en el almacén cifrado.
-  ///
   /// Produce **exactamente la misma forma** que devuelve `GET /api/usuarios/yo`,
-  /// para que [desdeJson] pueda releerlo sin ninguna rama especial. Un formato
+  /// para que [fromJson] pueda releerlo sin ninguna rama especial. Un formato
   /// propio obligaría a mantener dos deserializadores que tienen que coincidir.
   ///
   /// Contiene nombre y teléfono: es dato personal, y por eso se guarda cifrado
   /// y se borra al cerrar sesión.
-  Map<String, dynamic> aJson() => {
-    'id_usuario': idUsuario,
-    'nombre': nombre,
-    'telefono': telefono,
-    'estado_membresia': estadoMembresia.aApi,
-    'comunidad': comunidad?.aJson(),
-    'solicitud_pendiente': solicitudPendiente?.aJson(),
-  };
+  Map<String, dynamic> toJson() => _$PerfilVecinoToJson(this);
+
+  factory PerfilVecino.desdeJson(Map<String, dynamic> json) =>
+      PerfilVecino.fromJson(json);
+
+  Map<String, dynamic> aJson() => toJson();
+
+  static int _entero(Object? v) => (v as num?)?.toInt() ?? 0;
+  static String _texto(Object? v) => v as String? ?? '';
+  static String _nombrePersona(Object? v) => v as String? ?? 'Vecino';
+  static String _membresiaAJson(EstadoMembresia m) => m.aApi;
 }
 
 /// Atajo de legibilidad para las guardias y el gesto de pánico.

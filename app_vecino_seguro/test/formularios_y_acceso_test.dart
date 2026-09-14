@@ -287,7 +287,7 @@ void main() {
   // 401 vs 403
   // -------------------------------------------------------------------------
   group('401 y 403 no significan lo mismo', () {
-    testWidgets('un 401 cierra la sesión', (tester) async {
+    test('un 401 cierra la sesión', () async {
       final sesion = await sesionActiva();
       final api = ClienteApi(
         sesion: sesion,
@@ -309,7 +309,7 @@ void main() {
       expect(sesion.autenticado, isFalse);
     });
 
-    testWidgets('un 403 sin código de negocio cierra la sesión', (tester) async {
+    test('un 403 sin código de negocio cierra la sesión', () async {
       final sesion = await sesionActiva();
       final api = ClienteApi(
         sesion: sesion,
@@ -329,7 +329,7 @@ void main() {
       expect(sesion.autenticado, isFalse);
     });
 
-    testWidgets('un 403 NO_ES_ADMIN NO cierra la sesión', (tester) async {
+    test('un 403 NO_ES_ADMIN NO cierra la sesión', () async {
       final sesion = await sesionActiva(esAdmin: true);
       final api = ClienteApi(
         sesion: sesion,
@@ -360,7 +360,7 @@ void main() {
       );
     });
 
-    testWidgets('un 403 SIN_COMUNIDAD tampoco cierra la sesión', (tester) async {
+    test('un 403 SIN_COMUNIDAD tampoco cierra la sesión', () async {
       final sesion = await sesionActiva();
       final api = ClienteApi(
         sesion: sesion,
@@ -381,7 +381,7 @@ void main() {
       expect(sesion.autenticado, isTrue);
     });
 
-    testWidgets('un 422 nunca cierra la sesión', (tester) async {
+    test('un 422 nunca cierra la sesión', () async {
       final sesion = await sesionActiva();
       final api = ClienteApi(
         sesion: sesion,

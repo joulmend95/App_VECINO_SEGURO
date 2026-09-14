@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { RolUsuario, EstadoSolicitud } from '@prisma/client';
 import { JWT_SECRET, DURACION_TOKEN, RONDAS_BCRYPT } from '../config/entorno';
+import { emitirParDeTokens } from './renovacion.service';
 
 // ============================================================================
 // TIPOS
@@ -92,10 +93,10 @@ export const registrarUsuario = async ({
         },
     });
 
-    // Se devuelve el token para que el vecino entre directo tras registrarse,
-    // sin un segundo viaje al servidor.
+    // Se devuelve el par de tokens para que el vecino entre directo tras
+    // registrarse, sin un segundo viaje al servidor.
     return {
-        token: firmarToken(usuario.id_usuario),
+        ...(await emitirParDeTokens(usuario.id_usuario)),
         perfil: await obtenerPerfil(usuario.id_usuario),
     };
 };
@@ -130,7 +131,7 @@ export const login = async (telefono: string, password: string) => {
     }
 
     return {
-        token: firmarToken(usuario.id_usuario),
+        ...(await emitirParDeTokens(usuario.id_usuario)),
         perfil: await obtenerPerfil(usuario.id_usuario),
     };
 };

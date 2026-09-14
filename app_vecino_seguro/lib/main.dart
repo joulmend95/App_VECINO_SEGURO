@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'config/entorno.dart';
 import 'firebase_options.dart';
 import 'modelos/perfil_vecino.dart';
 import 'navegacion/rutas.dart';
@@ -32,6 +33,11 @@ Future<void> manejarAvisoEnSegundoPlano(RemoteMessage mensaje) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Aborta si la compilación de producción no apunta a HTTPS. Va aquí, antes
+  // de cualquier petición: un fallo de arranque se descubre al primer intento;
+  // un aviso en el registro se descubre cuando ya hay usuarios.
+  Entorno.verificar();
 
   // Si Firebase falla al iniciar, la app arranca igual: las alertas se siguen
   // viendo en el muro y en la bandeja. El push es una comodidad, no la vía

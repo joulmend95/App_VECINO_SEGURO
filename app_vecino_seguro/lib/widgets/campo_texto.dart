@@ -127,6 +127,13 @@ class CampoTexto extends StatelessWidget {
             labelText: etiqueta,
             hintText: pista,
             errorText: hayError ? textoError : null,
+            // Flutter corta el error en UNA línea por defecto. Los mensajes que
+            // devuelve el servidor son frases completas —«El nombre de la
+            // comunidad no puede superar 80 caracteres.»— y se quedaban en
+            // «...no puede superar 80 caracter...». Un error que no se puede
+            // leer entero no sirve de nada: el vecino ve que algo falla pero no
+            // qué corregir.
+            errorMaxLines: 3,
             prefixIcon: icono != null
                 ? Icon(icono, size: context.escalarAdorno(t.tamano.iconoGrande))
                 : null,

@@ -6,6 +6,8 @@ import {
     actualizarPerfilController,
     cambiarPasswordController,
     generarTokenPruebaController,
+    renovarController,
+    cerrarSesionController,
 } from '../controllers/usuario.controller';
 import { verificarAutenticacion } from '../middlewares/auth.middleware';
 import { validar } from '../middlewares/validacion.middleware';
@@ -33,6 +35,15 @@ router.post(
     ]),
     loginController
 );
+
+// POST /api/usuarios/renovar — canjear el token de renovación por uno nuevo
+//
+// SIN `verificarAutenticacion`: se llama justo cuando el token de acceso ya
+// caducó. La credencial aquí es el propio token de renovación.
+router.post('/renovar', renovarController);
+
+// POST /api/usuarios/salir — revocar las sesiones en el servidor
+router.post('/salir', verificarAutenticacion, cerrarSesionController);
 
 // GET /api/usuarios/yo — perfil y estado de pertenencia
 router.get('/yo', verificarAutenticacion, perfilController);

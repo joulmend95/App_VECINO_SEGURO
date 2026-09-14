@@ -8,7 +8,7 @@ import 'package:http/testing.dart';
 import 'package:app_vecino_seguro/servicios/almacen_local.dart';
 import 'package:app_vecino_seguro/servicios/cliente_api.dart';
 import 'package:app_vecino_seguro/servicios/cola_sincronizacion.dart';
-import 'package:app_vecino_seguro/servicios/servicio_alertas.dart';
+import 'package:app_vecino_seguro/datos/repositorios/repositorio_alertas.dart';
 import 'package:app_vecino_seguro/servicios/sesion.dart';
 
 import 'ayudas_prueba.dart';
@@ -31,7 +31,7 @@ void main() {
     return (
       cola: ColaSincronizacion(
         almacen: almacen,
-        alertas: ServicioAlertas(api, almacenLocal: almacen),
+        alertas: RepositorioAlertas.desdeCliente(api, almacenLocal: almacen),
       ),
       almacen: almacen,
       sesion: sesion,

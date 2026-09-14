@@ -78,8 +78,40 @@ model Usuario {
   dispositivos             Dispositivo[]
   alertas                  Alerta[]
   notificaciones           Notificacion[]
+  tokensRenovacion         TokenRenovacion[]
 
   @@index([id_comunidad])
+}
+
+/// Token de renovación de sesión.
+///
+/// El token de acceso dura 15 minutos; este dura 30 días y sirve para pedir
+/// uno nuevo sin volver a escribir la contraseña. La separación es lo que
+/// permite que una credencial robada caduque rápido sin obligar al vecino a
+/// reingresar cada cuarto de hora.
+model TokenRenovacion {
+  id_token Int @id @default(autoincrement())
+
+  /// Hash SHA-256 del token, NUNCA el token en claro.
+  ///
+  /// Si alguien se lleva un volcado de esta tabla, no obtiene sesiones
+  /// utilizables: tendría que invertir el hash. Es el mismo principio por el
+  /// que las contraseñas se guardan con bcrypt y no en texto.
+  hash String @unique
+
+  expira_en DateTime
+
+  /// Se marca al usarlo (rotación) y al cerrar sesión.
+  ///
+  /// No se borra la fila: conservar los revocados permite detectar que alguien
+  /// intentó reutilizar un token ya gastado, que es la señal de que se filtró.
+  revocado  Boolean  @default(false)
+  creado_en DateTime @default(now())
+
+  id_usuario Int
+  usuario    Usuario @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+
+  @@index([id_usuario, revocado])
 }
 
 /// 3. Solicitud de ingreso a una comunidad

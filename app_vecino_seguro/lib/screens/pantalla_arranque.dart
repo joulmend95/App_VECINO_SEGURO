@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../servicios/cliente_api.dart';
+import '../dominio/fallo_api.dart';
 import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Integración de la app móvil con el backend — Semana 13</title>
+<style>
+body{font-family:Calibri,"Segoe UI",sans-serif;font-size:11pt;line-height:1.45;color:#1a1a1a;max-width:17cm;margin:2cm auto}
+h1{font-size:20pt;border-bottom:2px solid #1a3d7c;padding-bottom:6pt;color:#1a3d7c}
+h2{font-size:15pt;margin-top:22pt;color:#1a3d7c}
+h3{font-size:12.5pt;margin-top:16pt;color:#333}
+table{border-collapse:collapse;width:100%;margin:10pt 0;font-size:10pt}
+th{background:#1a3d7c;color:#fff;text-align:left;padding:6pt;border:1px solid #999}
+td{padding:5pt 6pt;border:1px solid #bbb;vertical-align:top}
+tr:nth-child(even) td{background:#f4f6fa}
+code{font-family:Consolas,monospace;font-size:9.5pt;background:#eef1f6;padding:1pt 3pt}
+pre{font-family:Consolas,monospace;font-size:9.5pt;background:#f4f6fa;border-left:3px solid #1a3d7c;padding:8pt;white-space:pre-wrap}
+blockquote{border-left:3px solid #c0c8d8;margin:8pt 0;padding:2pt 0 2pt 12pt;color:#444}
+hr{border:0;border-top:1px solid #ccc;margin:16pt 0}
+a{color:#1a3d7c}
+</style></head><body>
+<h1>Integración de la app móvil con el backend — Semana 13</h1>
+<p><strong>Proyecto:</strong> Mi Vecino Seguro</p>
+<p><strong>Repositorio:</strong> https://github.com/joulmend95/App_VECINO_SEGURO</p>
+<p><strong>Cliente:</strong> Flutter 3.44 / Dart 3.13 · <strong>Servidor:</strong> Express 5 + Prisma/PostgreSQL</p>
+<hr>
+<h2>1. Configuración del cliente</h2>
+<p>Una <strong>sola instancia</strong> de Dio para toda la aplicación, construida en un único</p>
+<p>lugar: <a href="../app_vecino_seguro/lib/red/cliente_http.dart"><code>lib/red/cliente_http.dart</code></a>.</p>
+<p>Si cada pantalla creara la suya, cada una tendría su propio token y el cierre de</p>
+<p>sesión ante un 401 solo afectaría a una.</p>
+<table><thead><tr><th>Parámetro</th><th>Valor</th><th>Por qué</th></tr></thead><tbody>
+<tr><td><code>baseUrl</code></td><td><code>Entorno.urlBase</code></td><td>Constante de compilación, no archivo empaquetado</td></tr>
+<tr><td><code>connectTimeout</code></td><td><strong>8 s</strong></td><td>Establecer la conexión: si no responde en 8 s, no hay servidor</td></tr>
+<tr><td><code>receiveTimeout</code></td><td><strong>15 s</strong></td><td>Recibir la respuesta: el servidor contestó, tarda en terminar</td></tr>
+<tr><td><code>sendTimeout</code></td><td><strong>15 s</strong></td><td>Enviar el cuerpo</td></tr>
+<tr><td><code>contentType</code></td><td><code>application/json</code></td><td></td></tr>
+<tr><td><code>responseType</code></td><td><code>ResponseType.json</code></td><td></td></tr>
+<tr><td><code>validateStatus</code></td><td><code>codigo &lt; 500</code></td><td>Los 4xx llegan como <strong>respuesta</strong>, no como excepción</td></tr>
+</tbody></table>
+<p><strong>Dos tiempos de espera distintos, no uno.</strong> No poder conectar y que la respuesta</p>
+<p>tarde son problemas diferentes y merecen umbrales diferentes: ocho segundos sin</p>
+<p>establecer conexión ya significa que no hay servidor; quince para recibir da</p>
+<p>margen a una consulta lenta que sí va a terminar.</p>
+<p><strong><code>validateStatus: &lt; 500</code> tiene una consecuencia que condiciona el diseño.</strong> Un</p>
+<p>401 deja de ser una excepción y pasa a ser una respuesta normal. Por eso la</p>
+<p>renovación automática vive en <code>onResponse</code> y no en <code>onError</code>: en <code>onError</code> no</p>
+<p>vería nunca el 401 y sería código muerto.</p>
+<h3>Ambientes</h3>
+<pre># Desarrollo (valores por defecto)
+flutter run
+
+# Producción
+flutter build apk --release \
+  --dart-define=AMBIENTE=produccion \
+  --dart-define=URL_BASE=https://api.mivecinoseguro.ec</pre>
+<p><code>String.fromEnvironment</code> se resuelve <strong>al compilar</strong>: el valor queda fijado en el</p>
+<p>binario y no se puede alterar en el dispositivo. Un <code>.env</code> empaquetado como</p>
+<p>recurso viajaría dentro del APK y bastaría descomprimirlo para leerlo —o, en una</p>
+<p>compilación modificada, cambiarlo—.</p>
+<p>Sin <code>--dart-define</code>, la dirección por defecto distingue plataforma: el emulador</p>
+<p>de Android no ve el <code>localhost</code> del anfitrión, lo alcanza por la IP especial</p>
+<p><strong>10.0.2.2</strong>.</p>
+<hr>
+<h2>2. Interceptores y su orden</h2>
+<p>El orden <strong>no es arbitrario</strong>: cada posición se justifica por lo que el</p>
+<p>interceptor necesita ver.</p>
+<table><thead><tr><th>#</th><th>Interceptor</th><th>Por qué en esa posición</th></tr></thead><tbody>
+<tr><td>1</td><td><code>InterceptorAutorizacion</code></td><td>Inyecta el token del almacén cifrado. Va primero porque todo lo demás asume que la petición ya lleva credencial</td></tr>
+<tr><td>2</td><td><code>InterceptorRenovacion</code></td><td>Debe <strong>ver</strong> el 401 de una petición ya autorizada. Antes, vería peticiones sin token y no distinguiría «caducó» de «nunca hubo sesión»</td></tr>
+<tr><td>3</td><td><code>InterceptorReintento</code></td><td>Repite los <code>GET</code> ante fallos transitorios. Va <strong>tras</strong> la renovación: un 401 caducado se arregla renovando, no repitiendo con el mismo token</td></tr>
+<tr><td>4</td><td><code>InterceptorRegistro</code></td><td>Refleja lo que <strong>realmente</strong> salió y llegó. Ir último hace que cada reintento aparezca como una entrada más</td></tr>
+</tbody></table>
+<h3>2.1 Autorización</h3>
+<p>Adjunta el token a cada petición y <strong>se salta</strong> <code>/login</code>, <code>/registro</code> y</p>
+<p><code>/renovar</code>: esas tres no tienen sesión todavía, o la están renovando.</p>
+<h3>2.2 Renovación automática</h3>
+<p><code>QueuedInterceptor</code>, con tres protecciones:</p>
+<table><thead><tr><th>Protección</th><th>Qué evita</th></tr></thead><tbody>
+<tr><td><strong>Marca anti-bucle</strong> en <code>extra</code></td><td>Si el token nuevo también da 401, no se renueva otra vez. Sin ella, un servidor que rechaza incluso una credencial recién emitida haría girar la app indefinidamente</td></tr>
+<tr><td><strong>Comparación de token</strong></td><td>Varias peticiones que caducan a la vez disparan <strong>una sola</strong> renovación. Crítico: el servidor <strong>rota</strong> el token, así que cinco renovaciones simultáneas invalidarían las anteriores y cerrarían todas las sesiones del vecino</td></tr>
+<tr><td><strong>Cliente sin interceptores</strong> para el reintento</td><td>Reutilizar el mismo cliente metería la respuesta en una cola que sigue ocupada por la respuesta que la espera: bloqueo mutuo</td></tr>
+</tbody></table>
+<p>Secuencia observada en ejecución real:</p>
+<pre>GET  /api/alertas/comunidad  -&gt; 401  (TOKEN_EXPIRADO)
+POST /api/usuarios/renovar   -&gt; 200
+GET  /api/alertas/comunidad  -&gt; 200</pre>
+<p>Sin nada visible en pantalla. **Dos respuestas 401 produjeron una sola</p>
+<p>renovación**, confirmando la segunda protección.</p>
+<h3>2.3 Reintento</h3>
+<p>Solo <strong><code>GET</code></strong>, que es idempotente: pedir dos veces la misma lista devuelve la</p>
+<p>misma lista. Dos reintentos con espera creciente (400 ms y 800 ms).</p>
+<p><code>POST</code> <strong>no</strong> se reintenta en transporte. En esta aplicación un <code>POST</code> emite una</p>
+<p>alerta a toda la comunidad; repetirlo a ciegas convertiría una emergencia en tres</p>
+<p>avisos. Las creaciones solo se reintentan desde la cola de sincronización, que sí</p>
+<p>lleva un identificador único de cliente.</p>
+<h3>2.4 Registro</h3>
+<ul>
+<li><code>Authorization</code> sale siempre como <strong><code>Bearer </strong><em></code></em>*.</li>
+<li><strong>Nunca</strong> se registra el cuerpo de <code>/login</code>, <code>/registro</code>, <code>/renovar</code> ni</li>
+</ul>
+<p>  <code>/password</code>: llevan contraseñas en claro.</p>
+<ul>
+<li>La condición es una <strong>constante de compilación</strong>. En el binario de producción</li>
+</ul>
+<p>  la rama se elimina y el código de registro directamente no existe; una bandera</p>
+<p>  de ejecución seguiría ahí y bastaría un descuido para encenderla.</p>
+<hr>
+<h2>3. Correspondencia entre campos del servidor y del cliente</h2>
+<p>El servidor habla <code>snake_case</code> y el cliente <code>camelCase</code>. Cada divergencia queda</p>
+<p>anotada con <code>@JsonKey(name:)</code>, de modo que la traducción es **visible en la</p>
+<p>declaración del campo** y no enterrada en un constructor.</p>
+<h3><code>Alerta</code> — <code>GET /api/alertas/comunidad</code></h3>
+<table><thead><tr><th>Campo servidor</th><th>Campo cliente</th><th>Tipo</th><th>¿Anulable?</th><th>Anotación</th></tr></thead><tbody>
+<tr><td><code>id_alerta</code></td><td><code>idAlerta</code></td><td><code>int</code></td><td>No</td><td><code>@JsonKey(name: 'id_alerta')</code></td></tr>
+<tr><td><code>tipo_alerta</code></td><td><code>tipoAlerta</code></td><td><code>String</code></td><td>No</td><td><code>@JsonKey(name: 'tipo_alerta')</code></td></tr>
+<tr><td><code>fecha_hora</code></td><td><code>fechaHora</code></td><td><code>DateTime</code></td><td>No</td><td><code>@JsonKey(name: 'fecha_hora')</code></td></tr>
+<tr><td><code>estado</code></td><td><code>estado</code></td><td><code>String</code></td><td>No</td><td>— (coincide)</td></tr>
+<tr><td><code>es_panico</code></td><td><code>esPanico</code></td><td><code>bool</code></td><td>No, defecto <code>false</code></td><td><code>@JsonKey(name: 'es_panico')</code></td></tr>
+<tr><td><code>descripcion</code></td><td><code>descripcion</code></td><td><code>String?</code></td><td><strong>Sí</strong></td><td>— (coincide)</td></tr>
+<tr><td><code>usuario.nombre</code></td><td><code>nombreVecino</code></td><td><code>String</code></td><td>No</td><td><code>@JsonKey(name: 'usuario', fromJson:)</code></td></tr>
+</tbody></table>
+<p><strong>Una divergencia estructural, no de nombre.</strong> El servidor no devuelve</p>
+<p><code>nombre_vecino</code>: devuelve un objeto anidado `usuario: { id_usuario, nombre,</p>
+<p>telefono }`, fruto del <em>eager loading</em>. El cliente solo necesita el nombre, así</p>
+<p>que se aplana con un <code>fromJson</code> de campo en lugar de arrastrar una clase</p>
+<p><code>Usuario</code> que ninguna pantalla usaría.</p>
+<h3><code>PerfilVecino</code> — <code>GET /api/usuarios/yo</code></h3>
+<table><thead><tr><th>Campo servidor</th><th>Campo cliente</th><th>Tipo</th><th>¿Anulable?</th><th>Anotación</th></tr></thead><tbody>
+<tr><td><code>id_usuario</code></td><td><code>idUsuario</code></td><td><code>int</code></td><td>No</td><td><code>@JsonKey(name: 'id_usuario')</code></td></tr>
+<tr><td><code>nombre</code></td><td><code>nombre</code></td><td><code>String</code></td><td>No</td><td>—</td></tr>
+<tr><td><code>telefono</code></td><td><code>telefono</code></td><td><code>String</code></td><td>No</td><td>—</td></tr>
+<tr><td><code>estado_membresia</code></td><td><code>estadoMembresia</code></td><td><code>EstadoMembresia</code></td><td>No</td><td><code>@JsonKey(name:, fromJson:, toJson:)</code></td></tr>
+<tr><td><code>comunidad</code></td><td><code>comunidad</code></td><td><code>ComunidadDelVecino?</code></td><td><strong>Sí</strong></td><td>—</td></tr>
+<tr><td><code>solicitud_pendiente</code></td><td><code>solicitudPendiente</code></td><td><code>SolicitudPendiente?</code></td><td><strong>Sí</strong></td><td><code>@JsonKey(name: 'solicitud_pendiente')</code></td></tr>
+</tbody></table>
+<p>Anidados: <code>id_comunidad</code>→<code>idComunidad</code>, <code>es_admin</code>→<code>esAdmin</code>,</p>
+<p><code>id_solicitud</code>→<code>idSolicitud</code>, <code>fecha_solicitud</code>→<code>fechaSolicitud</code>.</p>
+<p><strong>Los opcionales son anulables porque el contrato los declara opcionales.</strong> Un</p>
+<p>vecino recién registrado no tiene comunidad; uno activo no tiene solicitud</p>
+<p>pendiente. Marcarlos obligatorios forzaría a inventar objetos vacíos que después</p>
+<p>habría que distinguir de los reales.</p>
+<h3>Lectura defensiva sobre la serialización generada</h3>
+<p><code>json_serializable</code> <strong>lanza excepción</strong> ante un tipo inesperado. Aquí eso</p>
+<p>significaría que <strong>una sola alerta corrupta tumbaría el muro entero</strong>. Cada campo</p>
+<p>lleva un <code>fromJson:</code> que degrada a un valor razonable —fecha ilegible → «ahora»,</p>
+<p>tipo vacío → «Alerta sin clasificar»— y la lista sobrevive al registro malo.</p>
+<hr>
+<h2>4. Verificación de seguridad realizada</h2>
+<h3>4.1 Barrido de secretos</h3>
+<table><thead><tr><th>Comprobación</th><th>Resultado</th></tr></thead><tbody>
+<tr><td>Claves o tokens incrustados en <code>lib/</code></td><td><strong>Ninguno</strong></td></tr>
+<tr><td>URLs de producción incrustadas</td><td><strong>Ninguna</strong> (solo en comentarios)</td></tr>
+<tr><td><code>google-services.json</code>, <code>serviceAccount</code>, <code>.env</code> versionados</td><td><strong>Ninguno</strong></td></tr>
+</tbody></table>
+<p><strong>Salvedad explicada:</strong> <code>firebase_options.dart</code> está versionado y contiene claves</p>
+<p><code>AIzaSy…</code>. <strong>No son secretos.</strong> Las API keys de Firebase son identificadores</p>
+<p>públicos, diseñados para ir incrustados en el cliente, junto a <code>projectId</code> y</p>
+<p><code>messagingSenderId</code>. La seguridad de Firebase no viene de ocultar esa clave</p>
+<p>—imposible en una app que se distribuye— sino de las reglas de seguridad y App</p>
+<p>Check. Lo que <strong>sí</strong> es secreto es el JSON de credenciales de servicio del</p>
+<p>backend, y está fuera del control de versiones.</p>
+<h3>4.2 Almacenamiento de credenciales</h3>
+<p>Token de acceso y token de renovación viven en el almacén cifrado del sistema</p>
+<p>—Keystore en Android, Keychain en iOS—, nunca en <code>SharedPreferences</code> ni en una</p>
+<p>variable en memoria. El token de renovación se protege igual que el de acceso</p>
+<p>porque <strong>vale tanto como la contraseña</strong>: con él se emiten credenciales nuevas.</p>
+<h3>4.3 HTTPS obligatorio en producción</h3>
+<p>Una comprobación en el arranque <strong>aborta la aplicación</strong> si la compilación es de</p>
+<p>producción y la dirección no empieza por <code>https://</code>.</p>
+<p>Se lanza una excepción en lugar de registrar un aviso a propósito: un fallo de</p>
+<p>arranque se descubre al primer intento; un aviso en el registro se descubre</p>
+<p>cuando ya hay usuarios. Sin cifrado, el token de sesión viaja en claro y</p>
+<p>cualquiera en la misma red wifi puede leerlo y suplantar al vecino.</p>
+<h3>4.4 Registro sin filtraciones</h3>
+<p>Verificado en ejecución: el encabezado <code>Authorization</code> aparece como <code>Bearer ***</code></p>
+<p>y los cuerpos de las rutas con contraseña no se registran. Apagado en producción</p>
+<p>por constante de compilación.</p>
+<h3>4.5 Semántica de 401 y 403 corregida</h3>
+<p>El middleware devolvía <strong>403</strong> para un token caducado. Ahora devuelve **401 +</p>
+<p><code>codigo: TOKEN_EXPIRADO</code>**.</p>
+<p>El 403 era incorrecto: según RFC 9110 §15.5.4 significa «te identifiqué y aun así</p>
+<p>no puedes»; un token caducado es «identifícate otra vez», que es el 401 (§15.5.2).</p>
+<p>Y no es académico: <strong>el interceptor reacciona al 401</strong>, así que con un 403 la</p>
+<p>renovación automática sería imposible de disparar.</p>
+<table><thead><tr><th>Respuesta</th><th>Significado</th><th>Acción del cliente</th></tr></thead><tbody>
+<tr><td><code>401</code> + <code>TOKEN_EXPIRADO</code></td><td>Caducó, <strong>renovable</strong></td><td>Renueva y reintenta, transparente</td></tr>
+<tr><td><code>401</code> sin código</td><td>Falta credencial</td><td>Cierra sesión, conserva el destino</td></tr>
+<tr><td><code>403</code> sin código</td><td>Token manipulado</td><td>Cierra sesión, <strong>sin</strong> conservar destino</td></tr>
+<tr><td><code>403</code> + <code>SIN_COMUNIDAD</code> / <code>NO_ES_ADMIN</code></td><td>Falta permiso</td><td><strong>No</strong> cierra sesión</td></tr>
+<tr><td><code>422</code></td><td>Contenido inválido</td><td>Reparte los errores campo por campo</td></tr>
+</tbody></table>
+<h3>4.6 Rotación y detección de reutilización</h3>
+<p>El token de renovación se guarda en la base <strong>hasheado con SHA-256</strong>, nunca en</p>
+<p>claro, y <strong>se rota en cada uso</strong>. Si se detecta la reutilización de uno ya</p>
+<p>gastado, se revocan <strong>todas</strong> las sesiones del vecino: es la señal inequívoca de</p>
+<p>que se filtró.</p>
+<hr>
+<h2>5. Verificación funcional</h2>
+<p>271 pruebas automatizadas en verde, <code>flutter analyze</code> sin incidencias y</p>
+<p><code>tsc --noEmit</code> sin errores. Además, recorrido manual completo contra el backend</p>
+<p>real con PostgreSQL:</p>
+<table><thead><tr><th>Comprobación</th><th>Resultado observado</th></tr></thead><tbody>
+<tr><td>Ingreso y listado</td><td><code>POST /login → 200</code> con los dos tokens · muro desde <code>GET /alertas/comunidad</code></td></tr>
+<tr><td>Creación</td><td><code>POST /alertas/emitir → 202</code> + identificador único en la base</td></tr>
+<tr><td>Idempotencia</td><td>Misma clave reenviada → <code>200 ya_existia</code>, <strong>sin duplicar</strong>; clave distinta a los segundos → <code>429</code></td></tr>
+<tr><td>Renovación</td><td><code>401 → renovar → 200</code>. <strong>Dos 401, una sola renovación</strong></td></tr>
+<tr><td>Validación local</td><td>Datos inválidos en el formulario: <strong>0 peticiones</strong> al servidor</td></tr>
+<tr><td>Validación del servidor</td><td><code>POST /comunidades → 422</code>, mensaje bajo su campo</td></tr>
+<tr><td>Sin conexión</td><td>Listado desde SQLite con antigüedad visible · emisión encolada · envío automático al volver la red</td></tr>
+</tbody></table>
+</body></html>
