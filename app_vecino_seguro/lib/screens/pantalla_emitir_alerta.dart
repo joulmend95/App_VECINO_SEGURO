@@ -7,7 +7,10 @@ import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';
 import '../widgets/campo_texto.dart';
 import '../widgets/categoria_alerta.dart';
+import '../servicios/gestor_permisos.dart';
+import '../servicios/servicio_ubicacion.dart';
 import '../widgets/dialogo_confirmacion.dart';
+import '../widgets/flujo_permiso.dart';
 import '../widgets/selector_categoria.dart';
 
 /// **P5 — Emitir alerta**
@@ -42,6 +45,13 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
   String? _errorGeneral;
   bool _enviando = false;
 
+  /// Aviso sobre el lugar. **No es un error**: la alerta sale igual.
+  ///
+  /// Va en un campo aparte de [_errorGeneral] a propósito. Pintarlos con el
+  /// mismo estilo haría creer al vecino que su alerta no se envió, cuando sí
+  /// lo hizo; solo le faltan las coordenadas.
+  String? _avisoLugar;
+
   /// Se resuelve en [didChangeDependencies]: `context.servicios` no está
   /// disponible todavía en `initState`.
   BorradorAlerta? _borrador;
@@ -71,6 +81,50 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
     // que motiva su existencia.
     _descripcionCtrl.dispose();
     super.dispose();
+  }
+
+  /// Intenta obtener el lugar de la emergencia. **Nunca impide emitir.**
+  ///
+  /// La regla que gobierna todo este método: una alerta que no sale porque el
+  /// GPS tardó es mucho peor que una alerta sin coordenadas. El lugar es un
+  /// extra que ayuda a quien acude, no un requisito para avisar.
+  ///
+  /// Por eso cada rama termina devolviendo un resultado utilizable, y el aviso
+  /// al vecino —cuando lo hay— es informativo, no un bloqueo.
+  Future<ResultadoUbicacion> _obtenerLugar() async {
+    final estado = await pedirPermisoConExplicacion(
+      context,
+      Capacidad.ubicacion,
+    );
+    if (!mounted) return const UbicacionNoDisponible();
+
+    if (!estado.esUsable) {
+      // Sin permiso se emite igual. Solo se deja constancia en pantalla para
+      // que el vecino sepa que su alerta va sin lugar, y por qué.
+      setState(
+        () => _avisoLugar = estado.exigeAjustes
+            ? 'La alerta se enviará sin el lugar. Puedes activar la ubicación '
+                  'desde los ajustes del teléfono.'
+            : 'La alerta se enviará sin el lugar.',
+      );
+      return const UbicacionNoDisponible();
+    }
+
+    final resultado = await context.servicios.ubicacion.obtener();
+    if (!mounted) return const UbicacionNoDisponible();
+
+    // El permiso está concedido pero la ubicación del teléfono está apagada.
+    // Son dos cosas independientes, y el mensaje que resuelve cada una es
+    // distinto: aquí no hay que ir a los permisos, sino encender el GPS.
+    if (resultado is ServicioDesactivado) {
+      setState(
+        () => _avisoLugar =
+            'La ubicación del teléfono está apagada. La alerta se enviará '
+            'sin el lugar.',
+      );
+    }
+
+    return resultado;
   }
 
   Future<void> _emitir() async {
@@ -103,6 +157,13 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
       _errorGeneral = null;
     });
 
+    // El lugar se pide AQUÍ: después de confirmar y antes de encolar. Es «el
+    // momento en que la funcionalidad se va a usar», no el arranque de la app.
+    // Pedirlo antes de que el vecino confirme sería pedirle un permiso para
+    // algo que quizá cancele.
+    final lugar = await _obtenerLugar();
+    if (!mounted) return;
+
     try {
       final cola = context.servicios.cola;
 
@@ -114,10 +175,16 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
       // Se reutiliza la clave del intento anterior si lo hubo: sin eso, pulsar
       // "Emitir" otra vez tras un error del servidor crearía una segunda alerta
       // para la misma emergencia.
+      // Las coordenadas viajan DENTRO de la carga encolada. Así una alerta
+      // emitida sin conexión conserva el lugar donde ocurrió la emergencia, no
+      // el lugar donde estaba el teléfono cuando volvió la red: encolada en
+      // casa y sincronizada en el trabajo, apuntaría al trabajo.
       _claveEnCurso = await cola.encolarAlerta(
         tipoAlerta: categoria.nombre,
         descripcion: _descripcionCtrl.text,
         claveExistente: _claveEnCurso,
+        latitud: lugar.latitud,
+        longitud: lugar.longitud,
       );
       if (!mounted) return;
 
@@ -197,6 +264,11 @@ class _PantallaEmitirAlertaState extends State<PantallaEmitirAlerta> {
 
                     if (_errorGeneral != null) ...[
                       _AvisoError(mensaje: _errorGeneral!),
+                      SizedBox(height: t.espacio.entreGrupos),
+                    ],
+
+                    if (_avisoLugar != null) ...[
+                      _AvisoLugar(mensaje: _avisoLugar!),
                       SizedBox(height: t.espacio.entreGrupos),
                     ],
 
@@ -302,6 +374,57 @@ class _AvisoAlcance extends StatelessWidget {
 }
 
 /// Error de emisión, anunciado como región en vivo.
+/// Aviso sobre el lugar de la emergencia.
+///
+/// Usa los tokens de **advertencia**, no los de peligro, y el icono de
+/// información. La distinción no es decorativa: rojo y «error» le dirían al
+/// vecino que su alerta falló, cuando en realidad se envió y solo le faltan las
+/// coordenadas. En una app de seguridad, hacer dudar de que el aviso salió es
+/// peor que no decir nada.
+class _AvisoLugar extends StatelessWidget {
+  const _AvisoLugar({required this.mensaje});
+
+  final String mensaje;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        padding: EdgeInsets.all(t.espacio.entreGrupos),
+        decoration: BoxDecoration(
+          color: t.color.advertenciaSuave,
+          borderRadius: t.radio.brControl,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.place_outlined,
+                color: t.color.onAdvertenciaSuave,
+                size: context.escalarAdorno(t.tamano.iconoGrande),
+              ),
+            ),
+            SizedBox(width: t.espacio.entreElementos),
+            Expanded(
+              child: Text(
+                mensaje,
+                style: context.textos.bodyMedium?.copyWith(
+                  color: t.color.onAdvertenciaSuave,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AvisoError extends StatelessWidget {
   const _AvisoError({required this.mensaje});
 

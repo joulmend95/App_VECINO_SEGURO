@@ -10,6 +10,8 @@ import 'package:app_vecino_seguro/servicios/cliente_api.dart';
 import 'package:app_vecino_seguro/servicios/sesion.dart';
 import 'package:app_vecino_seguro/servicios/almacen_seguro.dart';
 import 'package:app_vecino_seguro/servicios/dependencias.dart';
+import 'package:app_vecino_seguro/servicios/gestor_permisos.dart';
+import 'package:app_vecino_seguro/servicios/servicio_ubicacion.dart';
 import 'package:app_vecino_seguro/modelos/perfil_vecino.dart';
 import 'package:app_vecino_seguro/theme/tema_app.dart';
 import 'package:app_vecino_seguro/widgets/tarjeta_alerta.dart';
@@ -87,6 +89,12 @@ Widget _montarPantalla(
   final servicios = Servicios(
     sesion: sesion,
     cliente: ClienteApi(sesion: sesion, cliente: cliente, urlBase: 'http://falso'),
+    // El muro consulta el permiso de notificaciones al montarse. Sin estos
+    // dobles iría al canal de plataforma, que no existe en `flutter test`.
+    permisos: GestorPermisosFalso(
+      inicial: {Capacidad.notificaciones: EstadoPermiso.concedido},
+    ),
+    ubicacion: ServicioUbicacionFalso(),
   );
 
   return Dependencias(
@@ -237,6 +245,10 @@ void main() {
             ),
           ),
         ),
+        permisos: GestorPermisosFalso(
+          inicial: {Capacidad.notificaciones: EstadoPermiso.concedido},
+        ),
+        ubicacion: ServicioUbicacionFalso(),
       );
 
       await tester.pumpWidget(

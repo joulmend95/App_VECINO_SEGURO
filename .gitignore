@@ -29,3 +29,8 @@ app_vecino_seguro/ios/Runner/GoogleService-Info.plist
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Material de trabajo, no entregable: guiones de grabación y los HTML
+# generados a partir de los .md para abrirlos en Word.
+docs/guion-*.md
+docs/*.html

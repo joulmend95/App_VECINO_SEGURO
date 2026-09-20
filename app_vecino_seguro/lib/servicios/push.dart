@@ -62,8 +62,15 @@ class ServicioPush {
     }
 
     try {
+      // Los canales SÍ se crean aquí, antes de cualquier notificación: sin
+      // canal, Android descarta el aviso en silencio.
       await _crearCanales();
-      await _pedirPermiso();
+
+      // El PERMISO ya no se pide aquí. Antes se solicitaba al iniciar sesión,
+      // que no es «el momento en que la funcionalidad se va a usar»: el vecino
+      // recibía un diálogo del sistema sin contexto, mientras esperaba a que
+      // cargara su muro. Ahora lo ofrece el propio muro, con una explicación
+      // delante — ver `TarjetaAvisos` en la pantalla del muro.
 
       FirebaseMessaging.onMessage.listen(_mostrarEnPrimerPlano);
 
@@ -112,18 +119,16 @@ class ServicioPush {
     await plugin?.createNotificationChannel(_canalPanico);
   }
 
-  Future<void> _pedirPermiso() async {
-    final ajustes = await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-
-    if (ajustes.authorizationStatus == AuthorizationStatus.denied) {
-      // No es un error: el vecino está en su derecho. Simplemente no recibirá
-      // avisos, pero la app sigue siendo plenamente utilizable.
-      debugPrint('[PUSH] El usuario denegó las notificaciones.');
-    }
+  /// Vuelve a registrar el token en el servidor.
+  ///
+  /// Se llama al volver la app a primer plano. En iOS el token solo existe
+  /// **después** de que se autoricen las notificaciones, así que un vecino que
+  /// las concede desde los ajustes del sistema no tendría token hasta que algo
+  /// lo pidiera de nuevo: sin esto, habría concedido el permiso y seguiría sin
+  /// recibir avisos, sin ningún síntoma que lo explicara.
+  Future<void> revalidar() async {
+    if (!_iniciado) return;
+    await _registrarToken();
   }
 
   Future<void> _registrarToken() async {

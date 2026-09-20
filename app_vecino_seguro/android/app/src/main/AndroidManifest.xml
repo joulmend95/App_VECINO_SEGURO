@@ -22,13 +22,15 @@
          servicio y el gesto deja de detectarse. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
-    <!-- Ubicación de la emergencia. Opcional: la app funciona sin concederla. -->
+    <!-- Ubicación de la emergencia. Se solicita SOLO al emitir una alerta, y
+         solo en uso: nunca en segundo plano. Opcional por diseño — la alerta
+         sale igual sin coordenadas, porque no enviarla sería mucho peor. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 
     <application
         android:label="Vecino Seguro"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="${permitirTraficoSinCifrar}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

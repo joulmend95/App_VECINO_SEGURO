@@ -151,7 +151,16 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
-    if (estado == AppLifecycleState.resumed) _drenarCola();
+    if (estado != AppLifecycleState.resumed) return;
+
+    _drenarCola();
+
+    // Volver de los ajustes del sistema es exactamente cuando el permiso de
+    // notificaciones pudo cambiar —en cualquiera de los dos sentidos—, y la
+    // aplicación no recibe ningún aviso cuando eso ocurre. Revalidar aquí es
+    // lo que impide que la app siga creyendo que puede avisar al vecino de una
+    // emergencia cuando ya no puede.
+    if (_pushActivo) _push.revalidar();
   }
 
   /// Muestra la cuenta atrás cuando el servicio nativo detecta el gesto.

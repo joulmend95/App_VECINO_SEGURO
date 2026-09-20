@@ -4,6 +4,15 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- Cadena de proposito de la ubicacion.
+	     Dice QUE se adjunta, PARA QUE sirve y CUANDO se pide. Una cadena
+	     generica del tipo "esta app necesita tu ubicacion" no explica nada al
+	     vecino que la lee en el dialogo, y Apple la rechaza en revision. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Adjuntamos el lugar de la emergencia a la alerta para que tus vecinos sepan a donde acudir. Solo se consulta al emitir una alerta, nunca en segundo plano.</string>
+	<!-- NO se declara NSLocationAlwaysAndWhenInUseUsageDescription a proposito:
+	     esta aplicacion nunca necesita la ubicacion con la app cerrada, y
+	     pedirla obligaria al vecino a conceder mucho mas de lo necesario. -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

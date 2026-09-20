@@ -42,6 +42,17 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // El trafico sin cifrar SOLO existe en depuracion.
+            //
+            // En desarrollo hace falta: el emulador habla con el backend local
+            // por HTTP contra 10.0.2.2. Dejarlo activo en release permitiria
+            // que el token de sesion viajara en claro, y cualquiera en la misma
+            // wifi podria leerlo y suplantar al vecino.
+            manifestPlaceholders["permitirTraficoSinCifrar"] = "false"
+        }
+        debug {
+            manifestPlaceholders["permitirTraficoSinCifrar"] = "true"
         }
     }
 }

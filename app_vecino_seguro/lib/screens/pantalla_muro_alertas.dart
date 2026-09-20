@@ -15,6 +15,7 @@ import '../widgets/campo_texto.dart';
 import '../widgets/categoria_alerta.dart';
 import '../widgets/dialogo_confirmacion.dart';
 import '../widgets/tarjeta_alerta.dart';
+import '../widgets/tarjeta_avisos.dart';
 import '../widgets/vista_estado.dart';
 
 /// **P4 — Muro de Alertas de la Comunidad**
@@ -368,6 +369,21 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
                 antiguedad: _antiguedad!,
                 pendientes: _pendientes,
               ),
+
+            // --- Ofrecimiento de activar los avisos ---
+            // Va DESPUÉS del aviso de antigüedad y ANTES del buscador: el
+            // estado de los datos que ya se están viendo es más urgente que
+            // una mejora a futuro. Se oculta sola cuando el permiso está
+            // concedido, y reaparece si el vecino lo revoca.
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                t.espacio.margenPantalla,
+                t.espacio.entreGrupos,
+                t.espacio.margenPantalla,
+                0,
+              ),
+              child: const TarjetaAvisos(),
+            ),
 
             // --- Buscador (componente del catálogo) ---
             Padding(

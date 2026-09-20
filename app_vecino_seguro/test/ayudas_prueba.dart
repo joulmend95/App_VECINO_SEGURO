@@ -13,6 +13,8 @@ import 'package:app_vecino_seguro/servicios/almacen_seguro.dart';
 import 'package:app_vecino_seguro/servicios/detector_conexion.dart';
 import 'package:app_vecino_seguro/servicios/cliente_api.dart';
 import 'package:app_vecino_seguro/servicios/dependencias.dart';
+import 'package:app_vecino_seguro/servicios/gestor_permisos.dart';
+import 'package:app_vecino_seguro/servicios/servicio_ubicacion.dart';
 import 'package:app_vecino_seguro/servicios/sesion.dart';
 import 'package:app_vecino_seguro/theme/tema_app.dart';
 
@@ -178,6 +180,8 @@ Servicios serviciosDePrueba({
   required MockClient cliente,
   AlmacenLocal? local,
   DetectorConexion? detector,
+  GestorPermisos? permisos,
+  ServicioUbicacion? ubicacion,
 }) {
   // Sin esto, el canal de `shared_preferences` no existe y `getInstance()` se
   // queda esperando para siempre. Cerrar sesión llama a `prefs.clear()`, así
@@ -193,6 +197,19 @@ Servicios serviciosDePrueba({
     ),
     almacenLocal: local ?? AlmacenLocalEnMemoria(),
     detector: detector ?? DetectorConexionFalso(),
+    // Por defecto, permisos concedidos: así las pruebas que no van sobre
+    // permisos no tienen que sortear diálogos que no les interesan. Con el
+    // estado `concedido`, `pedirPermisoConExplicacion` devuelve de inmediato y
+    // no muestra nada.
+    permisos:
+        permisos ??
+        GestorPermisosFalso(
+          inicial: {
+            Capacidad.ubicacion: EstadoPermiso.concedido,
+            Capacidad.notificaciones: EstadoPermiso.concedido,
+          },
+        ),
+    ubicacion: ubicacion ?? ServicioUbicacionFalso(),
   );
   sesion.alCerrarSesion = servicios.borrarDatosLocales;
   return servicios;
@@ -210,12 +227,16 @@ Servicios serviciosDePrueba({
   String? rutaInicial,
   AlmacenLocal? local,
   DetectorConexion? detector,
+  GestorPermisos? permisos,
+  ServicioUbicacion? ubicacion,
 }) {
   final servicios = serviciosDePrueba(
     sesion: sesion,
     cliente: cliente,
     local: local,
     detector: detector,
+    permisos: permisos,
+    ubicacion: ubicacion,
   );
 
   final enrutador = construirEnrutador(sesion);
@@ -253,12 +274,16 @@ Widget montarConDependencias({
   bool oscuro = false,
   AlmacenLocal? local,
   DetectorConexion? detector,
+  GestorPermisos? permisos,
+  ServicioUbicacion? ubicacion,
 }) {
   final servicios = serviciosDePrueba(
     sesion: sesion,
     cliente: cliente,
     local: local,
     detector: detector,
+    permisos: permisos,
+    ubicacion: ubicacion,
   );
 
   return Dependencias(

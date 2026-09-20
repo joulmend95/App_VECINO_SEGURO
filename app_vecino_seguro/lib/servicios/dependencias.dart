@@ -7,6 +7,8 @@ import 'borrador_alerta.dart';
 import 'cliente_api.dart';
 import 'cola_sincronizacion.dart';
 import 'detector_conexion.dart';
+import 'gestor_permisos.dart';
+import 'servicio_ubicacion.dart';
 import '../datos/repositorios/repositorio_alertas.dart';
 import 'servicio_comunidades.dart';
 import 'servicio_notificaciones.dart';
@@ -30,9 +32,13 @@ class Servicios {
     ClienteApi? cliente,
     AlmacenLocal? almacenLocal,
     DetectorConexion? detector,
+    GestorPermisos? permisos,
+    ServicioUbicacion? ubicacion,
   }) : api = cliente ?? ClienteApi(sesion: sesion),
        local = almacenLocal ?? AlmacenLocalSqflite(),
-       conexion = detector ?? DetectorConexionReal() {
+       conexion = detector ?? DetectorConexionReal(),
+       permisos = permisos ?? const GestorPermisosReal(),
+       ubicacion = ubicacion ?? const ServicioUbicacionReal() {
     usuarios = ServicioUsuarios(api);
     comunidades = ServicioComunidades(api);
     alertas = RepositorioAlertas.desdeCliente(api, almacenLocal: local);
@@ -50,6 +56,16 @@ class Servicios {
   /// Avisa de los cambios de conectividad para drenar la cola en cuanto vuelve
   /// la red.
   final DetectorConexion conexion;
+
+  /// Consulta y solicita los permisos del sistema.
+  ///
+  /// Cuelga de aquí, y no se instancia en cada pantalla, para que las pruebas
+  /// puedan inyectar los cuatro estados —incluida la denegación permanente, que
+  /// en un dispositivo real no se puede deshacer sin reinstalar—.
+  final GestorPermisos permisos;
+
+  /// Lugar de la emergencia. Opcional por diseño: la alerta sale sin él.
+  final ServicioUbicacion ubicacion;
 
   late final ServicioUsuarios usuarios;
   late final ServicioComunidades comunidades;
