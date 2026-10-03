@@ -1,8 +1,13 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci && npm run build"
+# npm ci lo ejecuta nixpacks en la fase de instalación; aquí solo se compila
+buildCommand = "npm run build"
 
 [deploy]
 startCommand = "npx prisma migrate deploy && npm start"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+[variables]
+# firebase-admin 14 y jwks-rsa 4 exigen Node 22
+NIXPACKS_NODE_VERSION = "22"
