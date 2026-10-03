@@ -1,0 +1,48 @@
+name: pruebas
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Análisis y pruebas unitarias
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.x"
+          channel: stable
+          cache: true
+
+      - name: Instalar dependencias
+        run: flutter pub get
+        working-directory: app_vecino_seguro
+
+      - name: Verificar análisis estático
+        run: flutter analyze --fatal-infos
+        working-directory: app_vecino_seguro
+
+      - name: Ejecutar pruebas unitarias con cobertura
+        run: flutter test --coverage --reporter=compact
+        working-directory: app_vecino_seguro
+
+      - name: Subir informe de cobertura
+        uses: codecov/codecov-action@v4
+        if: success()
+        with:
+          file: app_vecino_seguro/coverage/lcov.info
+          flags: unittests
+          fail_ci_if_error: false
+
+# Las pruebas de integración (integration_test/) no corren en CI porque
+# requieren un dispositivo físico y el backend activo. Se ejecutan
+# manualmente antes de cada publicación siguiendo la lista de verificación
+# en docs/08-pruebas-y-monitoreo.md.

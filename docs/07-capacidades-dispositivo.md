@@ -354,7 +354,7 @@ por hecha.
 - Versiones y estado de mantenimiento de los plugins **comprobados en pub.dev
   durante el desarrollo**, no de memoria.
 
-> ⚠️ **Atención especial a las indicaciones sobre permisos.** Es el área donde
+>  **Atención especial a las indicaciones sobre permisos.** Es el área donde
 > una respuesta generada caduca más rápido: cada versión de Android cambia qué
 > se declara, qué se pide en ejecución y qué exige justificación en la tienda.
 > Todo lo relativo a permisos de este documento se contrastó con la

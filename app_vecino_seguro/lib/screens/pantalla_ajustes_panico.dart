@@ -1,3 +1,5 @@
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +31,7 @@ class PantallaAjustesPanico extends StatefulWidget {
 class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
   bool _activo = false;
   bool _bateriaOptimizada = false;
+  bool _fullScreenOk = true;
   bool _cargando = true;
 
   ServicioPanico get _panico => context.servicios.panico;
@@ -42,10 +45,12 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
   Future<void> _cargarEstado() async {
     final activo = await _panico.estaActivo();
     final bateria = await _panico.bateriaOptimizada();
+    final fullScreen = await _panico.puedeFullScreen();
     if (!mounted) return;
     setState(() {
       _activo = activo;
       _bateriaOptimizada = bateria;
+      _fullScreenOk = fullScreen;
       _cargando = false;
     });
   }
@@ -117,6 +122,11 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
               _AvisoBateria(onCorregir: _panico.pedirExencionBateria),
             ],
 
+            if (_activo && !_fullScreenOk) ...[
+              SizedBox(height: t.espacio.entreGrupos),
+              _AvisoFullScreen(onCorregir: _panico.pedirPermisoFullScreen),
+            ],
+
             SizedBox(height: t.espacio.separacionSeccion),
 
             BotonAccion(
@@ -134,6 +144,28 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
               style: context.textos.bodySmall,
               textAlign: TextAlign.center,
             ),
+
+            // Solo visible en depuración: permite verificar que Crashlytics
+            // recibe el informe con traza y versión antes de publicar.
+            if (kDebugMode) ...[
+              SizedBox(height: t.espacio.separacionSeccion),
+              BotonAccion(
+                texto: 'Provocar fallo de prueba',
+                icono: Icons.bug_report_outlined,
+                variante: VarianteBoton.secundario,
+                etiquetaSemantica: 'Botón de prueba de monitoreo de fallos',
+                onPressed: () => FirebaseCrashlytics.instance.crash(),
+              ),
+              SizedBox(height: t.espacio.entreElementos),
+              Text(
+                'Solo visible en modo depuración. Verifica en la consola de '
+                'Firebase que el informe llega con su traza y versión.',
+                style: context.textos.bodySmall?.copyWith(
+                  color: t.color.onSuperficieSutil,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
         ),
       ),
@@ -239,6 +271,66 @@ class _AvisoBateria extends StatelessWidget {
           SizedBox(height: t.espacio.entreGrupos),
           BotonAccion(
             texto: 'Permitir que siga activo',
+            variante: VarianteBoton.secundario,
+            onPressed: onCorregir,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AvisoFullScreen extends StatelessWidget {
+  const _AvisoFullScreen({required this.onCorregir});
+
+  final VoidCallback onCorregir;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return Container(
+      padding: EdgeInsets.all(t.espacio.interiorCard),
+      decoration: BoxDecoration(
+        color: t.color.advertenciaSuave,
+        borderRadius: t.radio.brControl,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              ExcludeSemantics(
+                child: Icon(
+                  Icons.lock_open_outlined,
+                  color: t.color.onAdvertenciaSuave,
+                  size: context.escalarAdorno(t.tamano.iconoGrande),
+                ),
+              ),
+              SizedBox(width: t.espacio.entreElementos),
+              Expanded(
+                child: Text(
+                  'La pantalla de bloqueo no mostrará la cuenta atrás',
+                  style: context.textos.titleSmall?.copyWith(
+                    color: t.color.onAdvertenciaSuave,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: t.espacio.entreElementos),
+          Text(
+            'Android 14 requiere que habilites "Mostrar en pantalla completa" '
+            'para que la cuenta atrás aparezca cuando el teléfono esté bloqueado. '
+            'Sin esto, el gesto sigue enviando la alerta, pero no verás la '
+            'pantalla roja.',
+            style: context.textos.bodySmall?.copyWith(
+              color: t.color.onAdvertenciaSuave,
+            ),
+          ),
+          SizedBox(height: t.espacio.entreGrupos),
+          BotonAccion(
+            texto: 'Habilitar pantalla completa',
             variante: VarianteBoton.secundario,
             onPressed: onCorregir,
           ),

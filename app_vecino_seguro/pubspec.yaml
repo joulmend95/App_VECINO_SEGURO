@@ -49,9 +49,12 @@ dependencies:
   json_annotation: ^4.12.0
   permission_handler: ^13.0.2
   geolocator: ^14.0.3
+  firebase_crashlytics: ^5.2.7
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to

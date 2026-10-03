@@ -11,6 +11,10 @@
          el gesto con la app cerrada y la pantalla bloqueada. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- location: tipo exento sin condiciones adicionales en Android 15+ cuando
+         el usuario cierra la app desde recientes. Aplica porque el servicio
+         habilita alertas de emergencia con coordenadas adjuntas. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 
@@ -21,6 +25,12 @@
     <!-- Exención de optimización de batería: sin ella el sistema mata el
          servicio y el gesto deja de detectarse. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+
+    <!-- Notificación de pantalla completa al detectar el gesto: es lo que
+         enciende la pantalla y muestra la cuenta atrás sobre la pantalla de
+         bloqueo. Obligatorio desde Android 14 (API 34). El usuario debe
+         habilitarlo en Ajustes → Aplicaciones → Vecino Seguro → Permisos. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
 
     <!-- Ubicación de la emergencia. Se solicita SOLO al emitir una alerta, y
          solo en uso: nunca en segundo plano. Opcional por diseño — la alerta
@@ -56,14 +66,15 @@
         </activity>
 
         <!-- Servicio del botón de pánico.
-             `mediaPlayback` es el tipo honesto: el servicio mantiene una sesión
-             de medios con una pista silenciosa, que es el mecanismo por el que
-             Android le entrega los eventos de las teclas de volumen incluso con
-             la pantalla apagada. -->
+             `location`: tipo exento sin condiciones en Android 15+ cuando el
+             usuario cierra la app (otros tipos requieren comandos del usuario o
+             permisos Bluetooth). `mediaPlayback` mantiene la sesión de medios
+             que intercepta las teclas de volumen con la pantalla apagada. -->
         <service
             android:name=".ServicioPanico"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:stopWithTask="false"
+            android:foregroundServiceType="location|mediaPlayback" />
 
         <!-- Relanza el servicio al encender el teléfono -->
         <receiver

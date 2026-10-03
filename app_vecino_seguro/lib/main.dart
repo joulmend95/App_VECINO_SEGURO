@@ -1,13 +1,16 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'config/entorno.dart';
 import 'firebase_options.dart';
 import 'modelos/perfil_vecino.dart';
+import 'servicios/registro.dart';
 import 'navegacion/rutas.dart';
 import 'servicios/dependencias.dart';
 import 'screens/pantalla_cuenta_atras.dart';
@@ -47,8 +50,38 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     FirebaseMessaging.onBackgroundMessage(manejarAvisoEnSegundoPlano);
+
+    // Crashlytics: solo activo fuera de depuración para no contaminar los
+    // informes con errores de desarrollo. El identificador es el ID interno
+    // del vecino, nunca su correo ni su número de teléfono.
+    await FirebaseCrashlytics.instance
+        .setCrashlyticsCollectionEnabled(!kDebugMode);
+
+    // Los handlers de errores solo se instalan en release: en debug (y en los
+    // tests de integración, que también compilan en debug) el framework de tests
+    // instala su propio FlutterError.onError, y reemplazarlo haría que los
+    // errores del test no llegaran al runner y el test fallara con un mensaje
+    // sobre "overrode FlutterError.onError".
+    if (!kDebugMode) {
+      FlutterError.onError =
+          FirebaseCrashlytics.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+    }
+
+    // Wiring entre el wrapper de logging y Crashlytics.
+    Registro.configurarMonitoreo((mensaje, excepcion, traza, {required fatal}) {
+      FirebaseCrashlytics.instance.recordError(
+        excepcion ?? mensaje,
+        traza,
+        reason: mensaje,
+        fatal: fatal,
+      );
+    });
   } catch (e) {
-    debugPrint('[PUSH] Firebase no disponible: $e');
+    debugPrint('[INICIO] Firebase no disponible: $e');
   }
 
   runApp(const VecinoSeguroApp());
@@ -136,9 +169,21 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
       // Al recuperar la sesión se reintenta lo que quedó sin enviar por falta
       // de red: una petición de auxilio no debe perderse.
       _drenarCola();
+
+      // Asocia el informe de fallos al vecino usando su ID interno, nunca
+      // su correo ni teléfono. Esto permite correlacionar el crash con la
+      // sesión sin exponer datos personales en el dashboard de Crashlytics.
+      final id = _sesion.perfil?.idUsuario;
+      if (id != null && !kDebugMode) {
+        FirebaseCrashlytics.instance.setUserIdentifier(id.toString());
+      }
     } else if (!_sesion.autenticado && _pushActivo) {
       _pushActivo = false;
       _push.detener();
+      // Al cerrar sesión, limpiar el identificador del informe de fallos.
+      if (!kDebugMode) {
+        FirebaseCrashlytics.instance.setUserIdentifier('');
+      }
     }
   }
 

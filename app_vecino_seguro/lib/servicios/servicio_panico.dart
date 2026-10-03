@@ -93,6 +93,27 @@ class ServicioPanico {
     }
   }
 
+  /// `false` si Android 14+ requiere que el usuario habilite la notificación
+  /// de pantalla completa en Ajustes. Sin este permiso la cuenta atrás no
+  /// aparece desde la pantalla de bloqueo.
+  Future<bool> puedeFullScreen() async {
+    if (!disponible) return false;
+    try {
+      return await _metodos.invokeMethod<bool>('puedeFullScreen') ?? true;
+    } on PlatformException {
+      return true;
+    }
+  }
+
+  Future<void> pedirPermisoFullScreen() async {
+    if (!disponible) return;
+    try {
+      await _metodos.invokeMethod('pedirPermisoFullScreen');
+    } on PlatformException catch (e) {
+      debugPrint('[PANICO] No se pudo abrir ajustes full screen: ${e.message}');
+    }
+  }
+
   void cerrar() {
     _suscripcion?.cancel();
     _suscripcion = null;

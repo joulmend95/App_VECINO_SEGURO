@@ -4,8 +4,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Build
@@ -41,7 +44,9 @@ class ServicioPanico : Service() {
 
     companion object {
         const val CANAL_SERVICIO = "panico_servicio"
+        const val CANAL_EMERGENCIA = "panico_emergencia"
         const val ID_NOTIFICACION = 4321
+        const val ID_NOTIF_EMERGENCIA = 4322
 
         const val ACCION_INICIAR = "com.vecinoseguro.app.INICIAR_PANICO"
         const val ACCION_DETENER = "com.vecinoseguro.app.DETENER_PANICO"
@@ -87,10 +92,37 @@ class ServicioPanico : Service() {
         if (activo) return
 
         crearCanal()
-        startForeground(ID_NOTIFICACION, construirNotificacion())
+
+        // La sesión DEBE crearse antes de startForeground en Android 14+:
+        // el tipo mediaPlayback exige un token de sesión activo en la
+        // notificación (MediaStyle). Sin esto Android 16 mata el servicio
+        // al cerrar la app aunque sea START_STICKY.
+        val s = MediaSessionCompat(this, "VecinoSeguroPanico")
+        configurarSesionDeMedios(s)
+        sesion = s
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // location exime del task-removal en Android 15+ sin condiciones
+            // adicionales, pero Android 14+ lanza SecurityException si el
+            // permiso de ubicación no está concedido en tiempo de ejecución.
+            // Se incluye solo cuando el permiso ya fue otorgado.
+            val tieneUbicacion =
+                ContextCompat.checkSelfPermission(this,
+                    android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+
+            val tipo = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                if (tieneUbicacion) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+
+            startForeground(ID_NOTIFICACION, construirNotificacion(s.sessionToken), tipo)
+        } else {
+            startForeground(ID_NOTIFICACION, construirNotificacion(s.sessionToken))
+        }
 
         iniciarAudioSilencioso()
-        iniciarSesionDeMedios()
         adquirirWakeLock()
 
         activo = true
@@ -119,9 +151,7 @@ class ServicioPanico : Service() {
     // Detección del gesto
     // -------------------------------------------------------------------------
 
-    private fun iniciarSesionDeMedios() {
-        val s = MediaSessionCompat(this, "VecinoSeguroPanico")
-
+    private fun configurarSesionDeMedios(s: MediaSessionCompat) {
         // `setPlaybackToRemote` es lo que hace que las teclas de volumen lleguen
         // a `onAdjustVolume` en lugar de cambiar el volumen del sistema.
         s.setPlaybackToRemote(
@@ -142,7 +172,6 @@ class ServicioPanico : Service() {
         )
 
         s.isActive = true
-        sesion = s
     }
 
     /**
@@ -172,22 +201,42 @@ class ServicioPanico : Service() {
     private fun dispararGesto() {
         Log.i("Panico", "¡Gesto de pánico detectado!")
 
-        val callback = alDetectarGesto
-        if (callback != null) {
-            callback()
-        } else {
-            // La app está cerrada: se abre para mostrar la cuenta atrás, que es
-            // donde el vecino puede cancelar si fue un accidente.
-            abrirApp()
-        }
+        // Notifica a Flutter si el motor está activo (app en primer o segundo plano).
+        alDetectarGesto?.invoke()
+
+        // Siempre muestra la notificación de pantalla completa. Es la única forma
+        // de encender la pantalla y mostrar la cuenta atrás cuando el dispositivo
+        // está bloqueado, independientemente de si Flutter está activo o no.
+        mostrarNotificacionEmergencia()
     }
 
-    private fun abrirApp() {
+    private fun mostrarNotificacionEmergencia() {
+        crearCanalEmergencia()
+
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("gesto_panico", true)
         }
-        startActivity(intent)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        else
+            PendingIntent.FLAG_UPDATE_CURRENT
+
+        val pi = PendingIntent.getActivity(this, 1, intent, flags)
+
+        val notif = NotificationCompat.Builder(this, CANAL_EMERGENCIA)
+            .setContentTitle("ALERTA DE EMERGENCIA")
+            .setContentText("Toca aquí para cancelar si fue un accidente.")
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setFullScreenIntent(pi, true)
+            .setAutoCancel(true)
+            .build()
+
+        getSystemService(NotificationManager::class.java)
+            .notify(ID_NOTIF_EMERGENCIA, notif)
     }
 
     // -------------------------------------------------------------------------
@@ -217,7 +266,7 @@ class ServicioPanico : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "VecinoSeguro::Panico"
-        ).apply { acquire() }
+        ).apply { acquire(10 * 60 * 1000L) }
     }
 
     private fun crearCanal() {
@@ -234,11 +283,29 @@ class ServicioPanico : Service() {
             setShowBadge(false)
         }
 
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(canal)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
     }
 
-    private fun construirNotificacion(): android.app.Notification {
+    private fun crearCanalEmergencia() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val canal = NotificationChannel(
+            CANAL_EMERGENCIA,
+            "Emergencia de pánico",
+            // IMPORTANCE_HIGH: necesario para que aparezca como heads-up y sobre
+            // la pantalla de bloqueo. Sin HIGH la notificación no interrumpe.
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerta que se muestra al activar el botón de pánico."
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+        }
+
+        getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
+    }
+
+    private fun construirNotificacion(
+        tokenSesion: MediaSessionCompat.Token,
+    ): android.app.Notification {
         val abrir = PendingIntent.getActivity(
             this,
             0,
@@ -253,7 +320,31 @@ class ServicioPanico : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(abrir)
+            // MediaStyle con el token es obligatorio en Android 14+ para que el
+            // sistema reconozca el servicio como mediaPlayback legítimo y no lo
+            // detenga al cerrar la app.
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(tokenSesion)
+            )
             .build()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // El usuario eliminó la tarea desde el gestor de aplicaciones. START_STICKY
+        // pide al sistema que relance el servicio, pero en fabricantes con capas
+        // agresivas (XOS, MIUI, ColorOS) esto no siempre ocurre. El servicio se
+        // relanza a sí mismo explícitamente para garantizar la continuidad.
+        if (activo) {
+            val restart = Intent(applicationContext, ServicioPanico::class.java).apply {
+                action = ACCION_INICIAR
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restart)
+            } else {
+                startService(restart)
+            }
+        }
     }
 
     override fun onDestroy() {

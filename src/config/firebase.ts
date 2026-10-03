@@ -18,9 +18,13 @@ let app: App | null = null;
 let mensajeria: Messaging | null = null;
 
 function inicializar(): void {
+    // Dos formas de pasar las credenciales:
+    // 1. FIREBASE_CREDENCIALES_JSON — contenido JSON directo (Railway, variables de entorno en la nube)
+    // 2. FIREBASE_CREDENCIALES      — ruta a un archivo JSON local (desarrollo local)
+    const jsonDirecto = process.env.FIREBASE_CREDENCIALES_JSON?.trim();
     const ruta = process.env.FIREBASE_CREDENCIALES?.trim();
 
-    if (!ruta) {
+    if (!jsonDirecto && !ruta) {
         console.warn(
             '⚠️  [PUSH] FIREBASE_CREDENCIALES no está definida. ' +
             'Las notificaciones se guardarán en la base de datos pero NO se enviarán al teléfono.\n' +
@@ -30,7 +34,7 @@ function inicializar(): void {
         return;
     }
 
-    if (!fs.existsSync(ruta)) {
+    if (!jsonDirecto && ruta && !fs.existsSync(ruta)) {
         console.error(
             `❌ [PUSH] No se encontró el archivo de credenciales en "${ruta}". ` +
             'Revisa la ruta de FIREBASE_CREDENCIALES en tu .env'
@@ -39,7 +43,9 @@ function inicializar(): void {
     }
 
     try {
-        const credencial = JSON.parse(fs.readFileSync(ruta, 'utf8'));
+        const credencial = jsonDirecto
+            ? JSON.parse(jsonDirecto)
+            : JSON.parse(fs.readFileSync(ruta!, 'utf8'));
 
         app = getApps().length > 0
             ? getApps()[0]!

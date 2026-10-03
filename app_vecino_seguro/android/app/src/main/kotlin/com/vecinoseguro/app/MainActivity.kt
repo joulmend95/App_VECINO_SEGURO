@@ -1,11 +1,12 @@
 package com.vecinoseguro.app
 
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
-import android.content.Context
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -26,6 +27,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private var emisor: EventChannel.EventSink? = null
+
+    // true mientras haya un gesto pendiente de entregar a Flutter. Ocurre
+    // cuando el extra gesto_panico=true llega en onCreate/onNewIntent pero
+    // el EventChannel aún no registró el onListen (el motor Flutter tarda
+    // unos frames en arrancar). Se entrega en cuanto onListen se ejecuta.
+    private var gestoPendiente = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -49,6 +56,11 @@ class MainActivity : FlutterActivity() {
                     pedirExencionBateria()
                     respuesta.success(true)
                 }
+                "puedeFullScreen" -> respuesta.success(puedeFullScreenIntent())
+                "pedirPermisoFullScreen" -> {
+                    pedirPermisoFullScreen()
+                    respuesta.success(true)
+                }
                 else -> respuesta.notImplemented()
             }
         }
@@ -65,6 +77,14 @@ class MainActivity : FlutterActivity() {
                 ServicioPanico.alDetectarGesto = {
                     runOnUiThread { emisor?.success("gesto") }
                 }
+                // Entrega el gesto que llegó antes de que Flutter estuviera listo.
+                // Sucede cuando la app se abre desde la notificación de emergencia
+                // con la pantalla bloqueada: configureFlutterEngine corre después
+                // de onCreate, así que el extra llega antes que este onListen.
+                if (gestoPendiente) {
+                    gestoPendiente = false
+                    runOnUiThread { sink?.success("gesto") }
+                }
             }
 
             override fun onCancel(argumentos: Any?) {
@@ -75,21 +95,28 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * El servicio abre la app con este extra cuando el gesto ocurre estando
-     * cerrada. Se reenvía a Flutter en cuanto haya quien escuche.
+     * La notificación de emergencia trae este extra cuando la app ya estaba
+     * abierta (singleTop). Si el EventChannel está listo se entrega al instante;
+     * si no, se guarda en [gestoPendiente] para el próximo onListen.
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra("gesto_panico", false)) {
-            emisor?.success("gesto")
+            val sink = emisor
+            if (sink != null) {
+                sink.success("gesto")
+            } else {
+                gestoPendiente = true
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("gesto_panico", false)) {
-            // Se difiere: el motor de Flutter aún no está listo al crearse.
-            window.decorView.post { emisor?.success("gesto") }
+            // configureFlutterEngine aún no corrió: se deja pendiente y se
+            // entrega en onListen, cuando el EventChannel ya esté registrado.
+            gestoPendiente = true
         }
     }
 
@@ -134,8 +161,42 @@ class MainActivity : FlutterActivity() {
                 )
             )
         } catch (e: Exception) {
-            // Algunos fabricantes no exponen esa pantalla: se abre la general.
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
+
+    /**
+     * Indica si la app puede mostrar notificaciones de pantalla completa.
+     *
+     * En Android 14+ (API 34) este permiso no se concede automáticamente: el
+     * usuario debe habilitarlo en Ajustes. Sin él, `fullScreenIntent` se ignora
+     * y la cuenta atrás no aparece desde la pantalla de bloqueo.
+     */
+    private fun puedeFullScreenIntent(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return getSystemService(NotificationManager::class.java)
+                .canUseFullScreenIntent()
+        }
+        return true
+    }
+
+    private fun pedirPermisoFullScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startActivity(
+                    Intent(
+                        "android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT",
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            } catch (e: Exception) {
+                // Fallback si el fabricante no expone esa pantalla.
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                )
+            }
         }
     }
 }
