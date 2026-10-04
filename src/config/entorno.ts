@@ -8,7 +8,21 @@ import type { SignOptions } from 'jsonwebtoken';
  * iniciar sesión.
  */
 
-const esProduccion = process.env.NODE_ENV === 'production';
+/**
+ * `true` cuando el backend corre como función serverless (Vercel).
+ *
+ * Ahí cada petición puede atenderla una instancia distinta que no comparte
+ * memoria con las demás, así que nada guardado en memoria es fiable entre
+ * peticiones. `VERCEL` lo inyecta la plataforma; `MODO_SERVERLESS=1` permite
+ * forzarlo si las variables de sistema estuvieran desactivadas en el proyecto.
+ */
+const esServerless =
+    process.env.VERCEL === '1' || process.env.MODO_SERVERLESS === '1';
+
+// Un despliegue serverless siempre es público, incluso los de vista previa: se
+// trata como producción aunque falte NODE_ENV, para que nunca quede expuesta la
+// ruta de token de prueba ni se acepte un JWT_SECRET corto.
+const esProduccion = process.env.NODE_ENV === 'production' || esServerless;
 
 function exigir(nombre: string): string {
     const valor = process.env[nombre];
@@ -42,6 +56,8 @@ if (JWT_SECRET.length < 32) {
 export const PORT = Number(process.env.PORT || 3333);
 
 export const ES_PRODUCCION = esProduccion;
+
+export const ES_SERVERLESS = esServerless;
 
 /**
  * Vigencia del token de **acceso**.

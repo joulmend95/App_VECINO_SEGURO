@@ -111,7 +111,7 @@ void main() {
               .byType(Text)
               .evaluate()
               .map((e) => (e.widget as Text).data)
-              .where((t) => t != null && t!.isNotEmpty)
+              .where((t) => t != null && t.isNotEmpty)
               .take(15)
               .toList();
           debugPrint('[E2E-DIAG] loginRealizado=$loginRealizado  botonTocado=$botonTocado');

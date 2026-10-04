@@ -5,7 +5,7 @@ import cors from 'cors';
 // Se importa ANTES que cualquier otra cosa: valida la configuración y aborta el
 // arranque si falta JWT_SECRET, en lugar de firmar tokens con un secreto por
 // defecto escrito en el repositorio.
-import { PORT, ES_PRODUCCION } from './config/entorno';
+import { PORT, ES_PRODUCCION, ES_SERVERLESS } from './config/entorno';
 import './config/firebase';
 
 //IMPORTACIONES
@@ -15,8 +15,6 @@ import usuarioRoutes from './routes/usuario.routes';
 import alertaRoutes from './routes/alerta.routes';
 import notificacionRoutes from './routes/notificacion.routes';
 import dispositivoRoutes from './routes/dispositivo.routes';
-
-import './services/notificacion.worker';
 
 
 const app = express();
@@ -49,7 +47,13 @@ app.use('/api/alertas', alertaRoutes);
 app.use('/api/notificaciones', notificacionRoutes);
 app.use('/api/dispositivos', dispositivoRoutes);
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor escuchando en http://localhost:${PORT}`);
-    console.log(`Entorno: ${ES_PRODUCCION ? 'PRODUCCIÓN' : 'desarrollo'}`);
-});
+// En Vercel la plataforma recibe las peticiones y se las entrega a la app
+// exportada; abrir un puerto propio allí no tiene sentido.
+if (!ES_SERVERLESS) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Servidor escuchando en http://localhost:${PORT}`);
+        console.log(`Entorno: ${ES_PRODUCCION ? 'PRODUCCIÓN' : 'desarrollo'}`);
+    });
+}
+
+export default app;

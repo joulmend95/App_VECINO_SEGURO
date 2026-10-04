@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import NodeCache from 'node-cache';
 import { RolUsuario } from '@prisma/client';
 import prisma from '../config/prisma';
 import { JWT_SECRET } from '../config/entorno';
+import { CacheLocal } from '../config/cache';
 
 export interface VecinoAutenticado {
     id_usuario: number;
@@ -31,8 +31,11 @@ export interface AuthRequest extends Request {
  *
  * `invalidarPertenencia` fuerza el refresco inmediato cuando el administrador
  * aprueba o rechaza, de modo que en la práctica el cambio es instantáneo.
+ *
+ * En serverless no se cachea (ver `CacheLocal`): la invalidación no alcanzaría
+ * a las demás instancias.
  */
-const cachePertenencia = new NodeCache({ stdTTL: 30, checkperiod: 60 });
+const cachePertenencia = new CacheLocal({ stdTTL: 30, checkperiod: 60 });
 
 const claveCache = (id_usuario: number) => `pertenencia_${id_usuario}`;
 

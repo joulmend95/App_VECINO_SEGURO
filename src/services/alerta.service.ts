@@ -1,10 +1,10 @@
 import prisma from '../config/prisma';
-import NodeCache from 'node-cache';
 import { EstadoAlerta } from '@prisma/client';
-import { colaTrabajo } from './notificacion.worker';
+import { CacheLocal } from '../config/cache';
+import { encolarNotificacionAlerta } from './notificacion.worker';
 
-// Caché de listados: TTL de 60 segundos.
-const cacheAlertas = new NodeCache({ stdTTL: 60, checkperiod: 120 });
+// Caché de listados: TTL de 60 segundos. Desactivada en serverless (ver CacheLocal).
+const cacheAlertas = new CacheLocal({ stdTTL: 60, checkperiod: 120 });
 
 /**
  * Control de frecuencia por vecino.
@@ -12,8 +12,12 @@ const cacheAlertas = new NodeCache({ stdTTL: 60, checkperiod: 120 });
  * El botón de pánico es un endpoint sin freno: sin esto, un toque repetido (o
  * un gesto mal calibrado) inunda de notificaciones a toda la comunidad y la
  * gente acaba silenciando la app, que es justo lo contrario de lo que se busca.
+ *
+ * Se calcula a partir de la última alerta guardada y no de un contador en
+ * memoria: en serverless cada petición puede caer en una instancia distinta y
+ * un contador local dejaría pasar la segunda alerta. El índice
+ * `[id_usuario, fecha_hora]` hace que la consulta sea inmediata.
  */
-const cacheFrecuencia = new NodeCache({ stdTTL: 60, checkperiod: 30 });
 const SEGUNDOS_ENTRE_ALERTAS = 60;
 
 class DemasiadasAlertas extends Error {
@@ -62,12 +66,17 @@ export const emitirAlerta = async (datos: EmitirAlertaInput): Promise<ResultadoE
         }
     }
 
-    const claveFrecuencia = `ultima_alerta_${datos.id_usuario}`;
-    const ultima = cacheFrecuencia.get<number>(claveFrecuencia);
+    const ultima = await prisma.alerta.findFirst({
+        where: { id_usuario: datos.id_usuario },
+        orderBy: { fecha_hora: 'desc' },
+        select: { fecha_hora: true },
+    });
 
     if (ultima) {
-        const transcurridos = Math.floor((Date.now() - ultima) / 1000);
-        const restantes = SEGUNDOS_ENTRE_ALERTAS - transcurridos;
+        const transcurridos = Math.floor((Date.now() - ultima.fecha_hora.getTime()) / 1000);
+        // Acotado por si el reloj del servidor y el de la base de datos no
+        // coinciden: nunca se pide esperar más que el intervalo completo.
+        const restantes = Math.min(SEGUNDOS_ENTRE_ALERTAS - transcurridos, SEGUNDOS_ENTRE_ALERTAS);
         if (restantes > 0) throw new DemasiadasAlertas(restantes);
     }
 
@@ -90,10 +99,8 @@ export const emitirAlerta = async (datos: EmitirAlertaInput): Promise<ResultadoE
         },
     });
 
-    cacheFrecuencia.set(claveFrecuencia, Date.now());
-
     // Tarea asíncrona: no se espera para responder al teléfono.
-    colaTrabajo.emit('procesar-alerta-comunitaria', {
+    encolarNotificacionAlerta({
         id_alerta: nuevaAlerta.id_alerta,
         id_comunidad: datos.id_comunidad,
         id_emisor: datos.id_usuario,

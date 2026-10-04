@@ -7,14 +7,20 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/app.js",
     "dev": "tsx watch src/app.ts",
+    "postinstall": "prisma generate",
+    "verificar:api": "node herramientas/verificar_api.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": "24.x"
+  },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@vercel/functions": "^3.9.11",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

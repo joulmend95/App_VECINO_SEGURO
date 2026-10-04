@@ -1,10 +1,7 @@
-import { EventEmitter } from 'events';
+import { waitUntil } from '@vercel/functions';
 import prisma from '../config/prisma';
 import { tokensDeComunidad } from './notificacion.service';
 import { enviarAviso } from './push.service';
-
-class ColaNotificaciones extends EventEmitter {}
-export const colaTrabajo = new ColaNotificaciones();
 
 export interface TrabajoAlerta {
   id_alerta: number;
@@ -19,8 +16,17 @@ export interface TrabajoAlerta {
  * Se ejecuta fuera del ciclo de petición: el teléfono que emitió la alerta ya
  * recibió su `202 Accepted` y no espera a que esto termine. En una emergencia,
  * hacer esperar al emisor mientras se notifica a 200 vecinos sería lo peor.
+ *
+ * `waitUntil` es lo que lo hace posible en serverless: sin él, la función se
+ * congela al enviar la respuesta y los avisos no llegarían a salir. Fuera de
+ * Vercel no hace nada y la tarea sigue su curso en el proceso, como siempre.
  */
-colaTrabajo.on('procesar-alerta-comunitaria', async (datos: TrabajoAlerta) => {
+export const encolarNotificacionAlerta = (datos: TrabajoAlerta): void => {
+  waitUntil(procesarAlertaComunitaria(datos));
+};
+
+/** Nunca rechaza: un fallo al notificar no debe afectar a la alerta ya guardada. */
+const procesarAlertaComunitaria = async (datos: TrabajoAlerta): Promise<void> => {
   const { id_alerta, id_comunidad, id_emisor, es_panico = false } = datos;
 
   console.log(`[WORKER] Procesando alerta #${id_alerta}...`);
@@ -88,6 +94,4 @@ colaTrabajo.on('procesar-alerta-comunitaria', async (datos: TrabajoAlerta) => {
   } catch (error) {
     console.error(`[WORKER] Fallo procesando la alerta #${id_alerta}:`, error);
   }
-});
-
-console.log('Worker de notificaciones cargado y escuchando eventos...');
+};
