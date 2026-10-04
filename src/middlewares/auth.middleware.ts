@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { RolUsuario } from '@prisma/client';
 import prisma from '../config/prisma';
-import { JWT_SECRET } from '../config/entorno';
+import { JWT_SECRET, JWT_SECRET_PANICO } from '../config/entorno';
 import { CacheLocal } from '../config/cache';
 
 export interface VecinoAutenticado {
@@ -127,6 +127,61 @@ export const verificarAutenticacion = async (
     const pertenencia = await resolverPertenencia(idUsuario);
     if (!pertenencia) {
         // El token es válido pero el usuario ya no existe (cuenta eliminada).
+        res.status(403).json({ mensaje: 'Tu cuenta ya no está disponible.' });
+        return;
+    }
+
+    req.user = pertenencia;
+    next();
+};
+
+/**
+ * Verifica la credencial de pánico del servicio nativo.
+ *
+ * Solo la acepta la ruta de emisión de pánico. Se resuelve la pertenencia en
+ * cada uso, igual que con la sesión: un vecino expulsado deja de poder emitir
+ * aunque su credencial siga vigente.
+ */
+export const verificarCredencialPanico = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
+    const cabecera = req.headers['authorization'];
+    const token = cabecera?.startsWith('Bearer ') ? cabecera.slice(7).trim() : null;
+
+    if (!token) {
+        res.status(401).json({ mensaje: 'Falta la credencial de pánico.' });
+        return;
+    }
+
+    let idUsuario: number;
+    try {
+        const payload = jwt.verify(token, JWT_SECRET_PANICO) as {
+            id_usuario?: number;
+            alcance?: string;
+        };
+        if (payload.alcance !== 'panico' || typeof payload.id_usuario !== 'number') {
+            res.status(403).json({ mensaje: 'Credencial de pánico inválida.' });
+            return;
+        }
+        idUsuario = payload.id_usuario;
+    } catch (error: any) {
+        if (error?.name === 'TokenExpiredError') {
+            // El teléfono reacciona a este código pidiendo al vecino que abra
+            // la app, que renueva la credencial y envía la alerta.
+            res.status(401).json({
+                mensaje: 'La credencial de pánico caducó.',
+                codigo: 'CREDENCIAL_PANICO_EXPIRADA',
+            });
+            return;
+        }
+        res.status(403).json({ mensaje: 'Credencial de pánico inválida.' });
+        return;
+    }
+
+    const pertenencia = await resolverPertenencia(idUsuario);
+    if (!pertenencia) {
         res.status(403).json({ mensaje: 'Tu cuenta ya no está disponible.' });
         return;
     }

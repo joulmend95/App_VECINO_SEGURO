@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- azul600 de los tokens de la app: tiñe el icono de las notificaciones. -->
+    <color name="color_notificacion">#1D4ED8</color>
+</resources>

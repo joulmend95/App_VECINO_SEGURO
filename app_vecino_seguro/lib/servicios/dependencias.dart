@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'almacen_local.dart';
 import 'almacen_local_sqflite.dart';
+import 'avisos_entrantes.dart';
 import 'borrador_alerta.dart';
 import 'cliente_api.dart';
 import 'cola_sincronizacion.dart';
@@ -43,7 +44,7 @@ class Servicios {
     comunidades = ServicioComunidades(api);
     alertas = RepositorioAlertas.desdeCliente(api, almacenLocal: local);
     notificaciones = ServicioNotificaciones(api);
-    panico = ServicioPanico();
+    panico = ServicioPanico(api);
     cola = ColaSincronizacion(almacen: local, alertas: alertas);
   }
 
@@ -84,6 +85,10 @@ class Servicios {
   /// lo edita. Ver [BorradorAlerta] para el razonamiento completo.
   final BorradorAlerta borrador = BorradorAlerta();
 
+  /// Avisos push recibidos con la app abierta. Las pantallas lo escuchan para
+  /// actualizarse solas.
+  final AvisosEntrantes avisosEntrantes = AvisosEntrantes();
+
   /// Prepara lo que necesita arranque asíncrono. Se llama una vez, desde `main`.
   Future<void> iniciar() async {
     await local.abrir();
@@ -120,6 +125,7 @@ class Servicios {
     conexion.cerrar();
     cola.dispose();
     borrador.dispose();
+    avisosEntrantes.dispose();
     local.cerrar();
     api.cerrar();
   }

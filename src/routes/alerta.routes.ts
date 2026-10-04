@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import {
     verificarAutenticacion,
+    verificarCredencialPanico,
     exigirComunidadActiva,
 } from '../middlewares/auth.middleware';
 import {
+    credencialPanicoController,
     emitirAlertaController,
+    emitirPanicoController,
     listarAlertasComunidadController,
     obtenerAlertaController,
 } from '../controllers/alerta.controller';
@@ -19,6 +22,13 @@ const router = Router();
 
 // POST /api/alertas/emitir
 router.post('/emitir', verificarAutenticacion, exigirComunidadActiva, emitirAlertaController);
+
+// POST /api/alertas/panico/credencial — la pide la app para el servicio nativo
+router.post('/panico/credencial', verificarAutenticacion, exigirComunidadActiva, credencialPanicoController);
+
+// POST /api/alertas/panico — la usa el servicio nativo, con la app cerrada.
+// Lleva su propia verificación: no acepta tokens de sesión.
+router.post('/panico', verificarCredencialPanico, exigirComunidadActiva, emitirPanicoController);
 
 // GET /api/alertas/comunidad
 router.get('/comunidad', verificarAutenticacion, exigirComunidadActiva, listarAlertasComunidadController);

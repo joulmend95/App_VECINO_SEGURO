@@ -1,5 +1,7 @@
 import { Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { DURACION_CREDENCIAL_PANICO, JWT_SECRET_PANICO } from '../config/entorno';
 import * as alertaService from '../services/alerta.service';
 
 /**
@@ -122,4 +124,41 @@ export const obtenerAlertaController = async (req: AuthRequest, res: Response): 
         console.error('[obtenerAlerta]', error);
         res.status(500).json({ mensaje: 'No pudimos obtener la alerta.' });
     }
+};
+
+/**
+ * POST /api/alertas/panico/credencial
+ *
+ * Entrega al teléfono la credencial con la que su servicio nativo emite la
+ * alerta de pánico **sin que la app esté abierta**. Requiere sesión: solo la
+ * app autenticada puede pedirla, y la renueva cada vez que se abre.
+ *
+ * Alcance mínimo: sirve únicamente para `POST /api/alertas/panico` (ver
+ * `verificarCredencialPanico`), así que si se filtrara no da acceso a ningún
+ * dato del vecino ni de su comunidad.
+ */
+export const credencialPanicoController = (req: AuthRequest, res: Response): void => {
+    const token = jwt.sign(
+        { id_usuario: req.user!.id_usuario, alcance: 'panico' },
+        JWT_SECRET_PANICO,
+        { expiresIn: DURACION_CREDENCIAL_PANICO }
+    );
+    const { exp } = jwt.decode(token) as { exp: number };
+    res.status(200).json({
+        token_panico: token,
+        expira_en: new Date(exp * 1000).toISOString(),
+    });
+};
+
+/**
+ * POST /api/alertas/panico
+ *
+ * Emisión desde el servicio nativo, autenticada con la credencial de pánico.
+ * Es la misma emisión que `/emitir` —idempotencia, límite de frecuencia y
+ * aviso a la comunidad incluidos—, con el pánico forzado: esta ruta no puede
+ * usarse para emitir alertas de otro tipo.
+ */
+export const emitirPanicoController = (req: AuthRequest, res: Response): Promise<void> => {
+    req.body = { ...(req.body ?? {}), es_panico: true };
+    return emitirAlertaController(req, res);
 };

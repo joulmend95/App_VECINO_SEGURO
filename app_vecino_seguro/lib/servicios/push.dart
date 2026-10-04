@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'avisos_entrantes.dart';
 import 'servicio_notificaciones.dart';
 
 /// Gestión de notificaciones push.
@@ -21,9 +22,10 @@ import 'servicio_notificaciones.dart';
 /// Services, sin red— no debe impedir usar la aplicación: las alertas se siguen
 /// viendo en el muro y en la bandeja. El push es una comodidad, no la vía única.
 class ServicioPush {
-  ServicioPush(this._notificaciones);
+  ServicioPush(this._notificaciones, this._avisos);
 
   final ServicioNotificaciones _notificaciones;
+  final AvisosEntrantes _avisos;
 
   final _locales = FlutterLocalNotificationsPlugin();
 
@@ -105,7 +107,11 @@ class ServicioPush {
   Future<void> _crearCanales() async {
     if (kIsWeb || !Platform.isAndroid) return;
 
-    const ajustesAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // Silueta blanca: la barra de estado solo usa el canal alfa, y con el
+    // icono a color de la app se vería un cuadrado blanco.
+    const ajustesAndroid = AndroidInitializationSettings(
+      '@drawable/ic_notificacion',
+    );
     await _locales.initialize(
       settings: const InitializationSettings(android: ajustesAndroid),
     );
@@ -165,6 +171,10 @@ class ServicioPush {
   /// Se muestra a mano para que una emergencia no pase desapercibida solo
   /// porque el vecino tenía la app en pantalla.
   Future<void> _mostrarEnPrimerPlano(RemoteMessage mensaje) async {
+    // Primero la señal: el muro y la campana se actualizan aunque falle la
+    // notificación local de abajo.
+    _avisos.avisar();
+
     final aviso = mensaje.notification;
     if (aviso == null) return;
 

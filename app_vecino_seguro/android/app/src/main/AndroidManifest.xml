@@ -87,6 +87,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- Icono y color de los avisos push que llegan con la app cerrada.
+             Sin esto Android usa el icono de la app, que en la barra de estado
+             se ve como un cuadrado blanco: solo respeta el canal alfa. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notificacion" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/color_notificacion" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

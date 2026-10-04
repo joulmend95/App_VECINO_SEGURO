@@ -199,6 +199,71 @@ comprobar(inexistente.estado === 404, 'alerta inexistente → 404', inexistente)
 const malId = await llamar(baseB, 'GET', '/api/alertas/42abc', { token: tokenVecina });
 comprobar(malId.estado === 400, 'identificador malformado → 400', malId);
 
+// --- 4b. Pánico desde el servicio nativo (app cerrada) ----------------------
+console.log('4b. Pánico con la app cerrada');
+const registrar = async (nombre, n) => (await llamar(baseA, 'POST', '/api/usuarios/registro', {
+    cuerpo: { nombre, telefono: telefono(n), password: clave },
+})).json;
+const admin2 = await registrar('Admin Pánico', 4);
+const vecino2 = await registrar('Vecino Pánico', 5);
+const codigo2 = `PN-${sufijo}`.slice(0, 20);
+await llamar(baseA, 'POST', '/api/comunidades', { token: admin2.token, cuerpo: { codigo: codigo2, nombre: 'Comunidad pánico' } });
+await llamar(baseB, 'POST', '/api/comunidades/solicitudes', { token: vecino2.token, cuerpo: { codigo: codigo2 } });
+const pend2 = await llamar(baseA, 'GET', '/api/comunidades/solicitudes', { token: admin2.token });
+await llamar(baseB, 'PATCH', `/api/comunidades/solicitudes/${pend2.json?.solicitudes?.[0]?.id_solicitud}`, {
+    token: admin2.token, cuerpo: { accion: 'aprobar' },
+});
+
+const credSinSesion = await llamar(baseA, 'POST', '/api/alertas/panico/credencial');
+comprobar(credSinSesion.estado === 401, 'pedir credencial sin sesión → 401', credSinSesion);
+const credSinComunidad = await llamar(baseA, 'POST', '/api/alertas/panico/credencial', { token: tokenSolo });
+comprobar(credSinComunidad.estado === 403, 'pedir credencial sin comunidad → 403', credSinComunidad);
+const cred = await llamar(baseB, 'POST', '/api/alertas/panico/credencial', { token: vecino2.token });
+const tokenPanico = cred.json?.token_panico;
+comprobar(cred.estado === 200 && tokenPanico && Date.parse(cred.json?.expira_en) > Date.now(),
+    'pedir credencial de pánico → 200 con token y caducidad', cred);
+
+const conSesion = await llamar(baseA, 'POST', '/api/alertas/panico', { token: vecino2.token, cuerpo: {} });
+comprobar(conSesion.estado === 403, 'la ruta de pánico no acepta el token de sesión → 403', conSesion);
+const credEnPerfil = await llamar(baseA, 'GET', '/api/usuarios/yo', { token: tokenPanico });
+comprobar(credEnPerfil.estado === 403, 'la credencial de pánico no sirve para leer el perfil → 403', credEnPerfil);
+const credEnMuro = await llamar(baseB, 'GET', '/api/alertas/comunidad', { token: tokenPanico });
+comprobar(credEnMuro.estado === 403, 'la credencial de pánico no sirve para leer el muro → 403', credEnMuro);
+const credFalsa = await llamar(baseA, 'POST', '/api/alertas/panico', { token: tokenPanico.slice(0, -3) + 'abc', cuerpo: {} });
+comprobar(credFalsa.estado === 403, 'credencial de pánico manipulada → 403', credFalsa);
+
+const claveNativa = `nativo-${sufijo}-${Math.random().toString(36).slice(2)}`;
+const nativo = await llamar(baseA, 'POST', '/api/alertas/panico', {
+    token: tokenPanico,
+    // `tipo_alerta` se ignora: la ruta solo emite pánico.
+    cuerpo: { tipo_alerta: 'Ruido', latitud: -0.95, longitud: -79.65, clave_cliente: claveNativa },
+});
+const idNativo = nativo.json?.alerta?.id_alerta;
+comprobar(nativo.estado === 202 && nativo.json?.alerta?.es_panico === true
+    && nativo.json?.alerta?.tipo_alerta === 'Emergencia (botón de pánico)'
+    && nativo.json?.alerta?.latitud === -0.95,
+    'emitir pánico con la credencial → 202, pánico forzado y ubicación guardada', nativo);
+const reintentoNativo = await llamar(baseB, 'POST', '/api/alertas/panico', {
+    token: tokenPanico, cuerpo: { clave_cliente: claveNativa },
+});
+comprobar(reintentoNativo.estado === 200 && reintentoNativo.json?.alerta?.id_alerta === idNativo,
+    'reintento del servicio nativo con la misma clave → 200, sin duplicar', reintentoNativo);
+const segundoNativo = await llamar(baseA, 'POST', '/api/alertas/panico', {
+    token: tokenPanico, cuerpo: { clave_cliente: `${claveNativa}-2` },
+});
+comprobar(segundoNativo.estado === 429, 'segundo pánico antes de 60 s → 429', segundoNativo);
+const avisoAdmin2 = await esperarHasta(async () => {
+    const r = await llamar(baseB, 'GET', '/api/notificaciones', { token: admin2.token });
+    return r.json?.data?.some((n) => n.alerta?.id_alerta === idNativo) ? r : null;
+});
+comprobar(avisoAdmin2, 'la comunidad recibe la notificación del pánico nativo');
+
+await llamar(baseA, 'DELETE', `/api/comunidades/miembros/${vecino2.perfil?.id_usuario}`, { token: admin2.token });
+const expulsadoNativo = await llamar(baseB, 'POST', '/api/alertas/panico', {
+    token: tokenPanico, cuerpo: { clave_cliente: `${claveNativa}-3` },
+});
+comprobar(expulsadoNativo.estado === 403, 'expulsado: su credencial ya no emite → 403', expulsadoNativo);
+
 // --- 5. Notificaciones (trabajo posterior a la respuesta) -------------------
 console.log('5. Notificaciones');
 const notifVecina = await esperarHasta(async () => {
@@ -216,6 +281,26 @@ comprobar(notifAdmin, 'el admin recibe la notificación del pánico');
 const propia = await llamar(baseA, 'GET', '/api/notificaciones', { token: tokenAdmin });
 comprobar(!propia.json?.data?.some((n) => n.alerta?.id_alerta === idAlerta),
     'quien emite no se notifica a sí mismo', propia.json?.data?.map((n) => n.alerta?.id_alerta));
+
+// --- 5b. Limpiar la bandeja ------------------------------------------------
+console.log('5b. Limpiar la bandeja');
+const idNotifVecina = notifVecina?.json?.data?.find((n) => n.alerta?.id_alerta === idAlerta)?.id_notificacion;
+const ajena = await llamar(baseB, 'DELETE', `/api/notificaciones/${idNotifVecina}`, { token: tokenAdmin });
+comprobar(ajena.estado === 404, 'no se puede borrar la notificación de otro vecino → 404', ajena);
+const borrarUna = await llamar(baseA, 'DELETE', `/api/notificaciones/${idNotifVecina}`, { token: tokenVecina });
+comprobar(borrarUna.estado === 200, 'borrar una notificación propia → 200', borrarUna);
+const trasBorrar = await llamar(baseB, 'GET', '/api/notificaciones', { token: tokenVecina });
+comprobar(!trasBorrar.json?.data?.some((n) => n.id_notificacion === idNotifVecina),
+    'la notificación borrada ya no aparece', trasBorrar.json);
+const malBorrado = await llamar(baseA, 'DELETE', '/api/notificaciones/abc', { token: tokenVecina });
+comprobar(malBorrado.estado === 400, 'identificador malformado al borrar → 400', malBorrado);
+const vaciar = await llamar(baseB, 'DELETE', '/api/notificaciones', { token: tokenAdmin });
+comprobar(vaciar.estado === 200 && vaciar.json?.eliminadas >= 1, 'vaciar la bandeja → 200 con eliminadas', vaciar);
+const vacia = await llamar(baseA, 'GET', '/api/notificaciones', { token: tokenAdmin });
+comprobar(vacia.json?.data?.length === 0 && vacia.json?.no_leidas === 0, 'bandeja vacía y campana en 0', vacia.json);
+const muroIntacto = await llamar(baseB, 'GET', '/api/alertas/comunidad', { token: tokenAdmin });
+comprobar(muroIntacto.json?.data?.some((a) => a.id_alerta === idPanico),
+    'vaciar la bandeja no borra las alertas del muro', muroIntacto.json?.data?.map((a) => a.id_alerta));
 
 // --- 6. Sesión --------------------------------------------------------------
 console.log('6. Sesión');

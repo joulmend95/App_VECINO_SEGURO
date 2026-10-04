@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../modelos/alerta.dart';
 import '../navegacion/rutas.dart';
+import '../servicios/avisos_entrantes.dart';
 import '../servicios/cola_sincronizacion.dart';
 import '../dominio/fallo_api.dart';
 import '../servicios/dependencias.dart';
@@ -33,11 +36,21 @@ class PantallaMuroAlertas extends StatefulWidget {
   /// árbol de dependencias, para que toda la app use una sola sesión.
   final RepositorioAlertas? api;
 
+  /// Cada cuánto se actualiza solo el muro mientras está a la vista.
+  ///
+  /// Es la red de seguridad del push, no la vía principal: el aviso push
+  /// actualiza al instante, pero puede no llegar (permiso denegado, teléfono
+  /// sin servicios de Google). Sin esto, ese vecino no se enteraría de una
+  /// emergencia hasta refrescar a mano. Se detiene con la app en segundo plano
+  /// para no gastar batería ni datos.
+  static const intervaloActualizacion = Duration(seconds: 30);
+
   @override
   State<PantallaMuroAlertas> createState() => _PantallaMuroAlertasState();
 }
 
-class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
+class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
+    with WidgetsBindingObserver {
   RepositorioAlertas? _apiInyectada;
   late final TextEditingController _buscarCtrl;
 
@@ -94,7 +107,57 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       _cargar();
       _contarNoLeidas();
       _escucharCola();
+      _escucharAvisos();
     });
+    WidgetsBinding.instance.addObserver(this);
+    _programarActualizacion();
+  }
+
+  AvisosEntrantes? _avisos;
+  Timer? _temporizador;
+
+  /// Un aviso push con la app abierta significa que hay algo nuevo: se
+  /// actualizan el muro y la campana sin esperar al vecino.
+  void _escucharAvisos() {
+    if (!mounted) return;
+    _avisos = context.servicios.avisosEntrantes..addListener(_actualizarSolo);
+  }
+
+  void _programarActualizacion() {
+    _temporizador?.cancel();
+    _temporizador = Timer.periodic(
+      PantallaMuroAlertas.intervaloActualizacion,
+      (_) => _actualizarSolo(),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    switch (estado) {
+      case AppLifecycleState.resumed:
+        // Mientras la app estuvo en segundo plano pudieron llegar alertas que
+        // el vecino vio en la barra del sistema; al volver deben estar ya aquí.
+        _actualizarSolo();
+        _programarActualizacion();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        _temporizador?.cancel();
+        _temporizador = null;
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
+  /// Actualización que no inicia el vecino: muro y contador de la campana.
+  ///
+  /// Si falla, se conserva lo que ya se veía. Cambiar una lista válida por una
+  /// pantalla de error porque falló un refresco que nadie pidió alarmaría sin
+  /// motivo.
+  Future<void> _actualizarSolo() async {
+    if (!mounted || _refrescando || _estado is VistaCargando) return;
+    _contarNoLeidas();
+    await _cargar(esRefresco: true, conservarSiFalla: true);
   }
 
   ColaSincronizacion? _cola;
@@ -126,11 +189,17 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
     // respuesta solo gastaría sus datos móviles.
     _cancelacion.cancel('El vecino salió del muro.');
     _cola?.removeListener(_alCambiarLaCola);
+    _avisos?.removeListener(_actualizarSolo);
+    _temporizador?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _buscarCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _cargar({bool esRefresco = false}) async {
+  Future<void> _cargar({
+    bool esRefresco = false,
+    bool conservarSiFalla = false,
+  }) async {
     if (!esRefresco) setState(() => _estado = const VistaCargando());
     if (esRefresco) setState(() => _refrescando = true);
 
@@ -159,7 +228,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas> {
       if (e.fueCancelada) return;
 
       setState(() {
-        _estado = VistaError(e.mensaje);
+        if (!conservarSiFalla) _estado = VistaError(e.mensaje);
         _refrescando = false;
       });
     }

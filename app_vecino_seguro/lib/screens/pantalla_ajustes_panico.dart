@@ -31,7 +31,6 @@ class PantallaAjustesPanico extends StatefulWidget {
 class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
   bool _activo = false;
   bool _bateriaOptimizada = false;
-  bool _fullScreenOk = true;
   bool _cargando = true;
 
   ServicioPanico get _panico => context.servicios.panico;
@@ -45,12 +44,10 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
   Future<void> _cargarEstado() async {
     final activo = await _panico.estaActivo();
     final bateria = await _panico.bateriaOptimizada();
-    final fullScreen = await _panico.puedeFullScreen();
     if (!mounted) return;
     setState(() {
       _activo = activo;
       _bateriaOptimizada = bateria;
-      _fullScreenOk = fullScreen;
       _cargando = false;
     });
   }
@@ -120,11 +117,6 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
             if (_activo && _bateriaOptimizada) ...[
               SizedBox(height: t.espacio.entreGrupos),
               _AvisoBateria(onCorregir: _panico.pedirExencionBateria),
-            ],
-
-            if (_activo && !_fullScreenOk) ...[
-              SizedBox(height: t.espacio.entreGrupos),
-              _AvisoFullScreen(onCorregir: _panico.pedirPermisoFullScreen),
             ],
 
             SizedBox(height: t.espacio.separacionSeccion),
@@ -210,8 +202,9 @@ class _ExplicacionGesto extends StatelessWidget {
           SizedBox(height: t.espacio.entreGrupos),
           Text(
             'Sube o baja el volumen tres veces seguidas, en menos de un segundo '
-            'y medio. Tendrás 3 segundos para cancelar antes de que se avise a '
-            'tu comunidad.',
+            'y medio. Funciona también con la app cerrada y la pantalla '
+            'bloqueada: aparecerá una notificación con unos segundos para '
+            'tocar «Cancelar» antes de que se avise a tu comunidad.',
             style: context.textos.bodyMedium?.copyWith(
               color: t.color.onPeligroSuave,
             ),
@@ -271,66 +264,6 @@ class _AvisoBateria extends StatelessWidget {
           SizedBox(height: t.espacio.entreGrupos),
           BotonAccion(
             texto: 'Permitir que siga activo',
-            variante: VarianteBoton.secundario,
-            onPressed: onCorregir,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AvisoFullScreen extends StatelessWidget {
-  const _AvisoFullScreen({required this.onCorregir});
-
-  final VoidCallback onCorregir;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-
-    return Container(
-      padding: EdgeInsets.all(t.espacio.interiorCard),
-      decoration: BoxDecoration(
-        color: t.color.advertenciaSuave,
-        borderRadius: t.radio.brControl,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              ExcludeSemantics(
-                child: Icon(
-                  Icons.lock_open_outlined,
-                  color: t.color.onAdvertenciaSuave,
-                  size: context.escalarAdorno(t.tamano.iconoGrande),
-                ),
-              ),
-              SizedBox(width: t.espacio.entreElementos),
-              Expanded(
-                child: Text(
-                  'La pantalla de bloqueo no mostrará la cuenta atrás',
-                  style: context.textos.titleSmall?.copyWith(
-                    color: t.color.onAdvertenciaSuave,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: t.espacio.entreElementos),
-          Text(
-            'Android 14 requiere que habilites "Mostrar en pantalla completa" '
-            'para que la cuenta atrás aparezca cuando el teléfono esté bloqueado. '
-            'Sin esto, el gesto sigue enviando la alerta, pero no verás la '
-            'pantalla roja.',
-            style: context.textos.bodySmall?.copyWith(
-              color: t.color.onAdvertenciaSuave,
-            ),
-          ),
-          SizedBox(height: t.espacio.entreGrupos),
-          BotonAccion(
-            texto: 'Habilitar pantalla completa',
             variante: VarianteBoton.secundario,
             onPressed: onCorregir,
           ),

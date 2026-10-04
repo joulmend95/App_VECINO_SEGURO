@@ -102,3 +102,35 @@ export const marcarTodasLeidasController = async (
         manejar(error, res, 'marcarTodasLeidas');
     }
 };
+
+/** DELETE /api/notificaciones/:id — quita un aviso de la bandeja. */
+export const eliminarNotificacionController = async (
+    req: AuthRequest,
+    res: Response
+): Promise<void> => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            res.status(400).json({ mensaje: 'Identificador inválido.' });
+            return;
+        }
+
+        await servicio.eliminarNotificacion(id, req.user!.id_usuario);
+        res.status(200).json({ mensaje: 'Notificación eliminada.' });
+    } catch (error) {
+        manejar(error, res, 'eliminarNotificacion');
+    }
+};
+
+/** DELETE /api/notificaciones — vacía la bandeja. */
+export const vaciarBandejaController = async (
+    req: AuthRequest,
+    res: Response
+): Promise<void> => {
+    try {
+        const resultado = await servicio.vaciarBandeja(req.user!.id_usuario);
+        res.status(200).json({ mensaje: 'Bandeja vaciada.', ...resultado });
+    } catch (error) {
+        manejar(error, res, 'vaciarBandeja');
+    }
+};

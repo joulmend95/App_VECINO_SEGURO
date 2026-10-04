@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import type { SignOptions } from 'jsonwebtoken';
 
 /**
@@ -85,6 +86,25 @@ export const DURACION_TOKEN = (process.env.DURACION_TOKEN ||
  * aplicación, el vecino vuelve a escribir su contraseña.
  */
 export const DURACION_RENOVACION_DIAS = 30;
+
+/**
+ * Clave de firma de la **credencial de pánico**.
+ *
+ * Esa credencial la guarda el servicio nativo del teléfono para emitir la
+ * alerta sin que la app esté abierta. Se firma con una clave distinta, derivada
+ * de JWT_SECRET, para que su alcance quede garantizado por la criptografía y no
+ * por una comprobación que alguien pueda olvidar: un token de sesión no sirve
+ * para la ruta de pánico, y la credencial de pánico no sirve para nada más.
+ */
+export const JWT_SECRET_PANICO = createHash('sha256')
+    .update(`${JWT_SECRET}|credencial-panico`)
+    .digest('hex');
+
+/**
+ * Vigencia de la credencial de pánico. La app la renueva cada vez que se abre,
+ * así que solo caduca si el vecino pasa un mes sin abrirla.
+ */
+export const DURACION_CREDENCIAL_PANICO = '30d' as SignOptions['expiresIn'];
 
 /** Coste de bcrypt. 10 rondas es el equilibrio habitual entre seguridad y latencia. */
 export const RONDAS_BCRYPT = 10;

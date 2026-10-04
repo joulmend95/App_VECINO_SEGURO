@@ -126,7 +126,7 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     // El push sigue el ciclo de vida de la sesión: se registra el dispositivo
     // al autenticarse y se da de baja al cerrar sesión. Sin la baja, el
     // teléfono seguiría recibiendo alertas de una comunidad ajena.
-    _push = ServicioPush(_servicios.notificaciones);
+    _push = ServicioPush(_servicios.notificaciones, _servicios.avisosEntrantes);
     _sesion.addListener(_sincronizarPush);
 
     // El gesto de pánico solo se escucha con sesión iniciada: sin saber a qué
@@ -169,6 +169,8 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
       // Al recuperar la sesión se reintenta lo que quedó sin enviar por falta
       // de red: una petición de auxilio no debe perderse.
       _drenarCola();
+      // Renueva la credencial con la que el gesto emite con la app cerrada.
+      _servicios.panico.sincronizarCredencial();
 
       // Asocia el informe de fallos al vecino usando su ID interno, nunca
       // su correo ni teléfono. Esto permite correlacionar el crash con la
@@ -180,6 +182,10 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     } else if (!_sesion.autenticado && _pushActivo) {
       _pushActivo = false;
       _push.detener();
+      // Sin sesión, el gesto no debe poder emitir en nombre de nadie: se
+      // detiene el servicio y se borra su credencial. Coincide con el borrado
+      // de `panico_activado` en las preferencias.
+      _servicios.panico.desactivar();
       // Al cerrar sesión, limpiar el identificador del informe de fallos.
       if (!kDebugMode) {
         FirebaseCrashlytics.instance.setUserIdentifier('');
@@ -205,7 +211,10 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     // aplicación no recibe ningún aviso cuando eso ocurre. Revalidar aquí es
     // lo que impide que la app siga creyendo que puede avisar al vecino de una
     // emergencia cuando ya no puede.
-    if (_pushActivo) _push.revalidar();
+    if (_pushActivo) {
+      _push.revalidar();
+      _servicios.panico.sincronizarCredencial();
+    }
   }
 
   /// Muestra la cuenta atrás cuando el servicio nativo detecta el gesto.

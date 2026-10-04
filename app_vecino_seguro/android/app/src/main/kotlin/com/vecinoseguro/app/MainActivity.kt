@@ -1,6 +1,5 @@
 package com.vecinoseguro.app
 
-import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -56,9 +55,18 @@ class MainActivity : FlutterActivity() {
                     pedirExencionBateria()
                     respuesta.success(true)
                 }
-                "puedeFullScreen" -> respuesta.success(puedeFullScreenIntent())
-                "pedirPermisoFullScreen" -> {
-                    pedirPermisoFullScreen()
+                "guardarCredencial" -> {
+                    val url = llamada.argument<String>("url_base")
+                    val credencial = llamada.argument<String>("credencial")
+                    if (url.isNullOrBlank() || credencial.isNullOrBlank()) {
+                        respuesta.error("ARGUMENTOS", "Faltan url_base o credencial", null)
+                    } else {
+                        ServicioPanico.guardarCredencial(this, url, credencial)
+                        respuesta.success(true)
+                    }
+                }
+                "borrarCredencial" -> {
+                    ServicioPanico.borrarCredencial(this)
                     respuesta.success(true)
                 }
                 else -> respuesta.notImplemented()
@@ -109,6 +117,18 @@ class MainActivity : FlutterActivity() {
                 gestoPendiente = true
             }
         }
+    }
+
+    // El servicio de pánico decide con esto quién atiende el gesto: con la app a
+    // la vista, la pantalla de cuenta atrás de Flutter; si no, el propio servicio.
+    override fun onResume() {
+        super.onResume()
+        ServicioPanico.appEnPrimerPlano = true
+    }
+
+    override fun onPause() {
+        ServicioPanico.appEnPrimerPlano = false
+        super.onPause()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -162,41 +182,6 @@ class MainActivity : FlutterActivity() {
             )
         } catch (e: Exception) {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        }
-    }
-
-    /**
-     * Indica si la app puede mostrar notificaciones de pantalla completa.
-     *
-     * En Android 14+ (API 34) este permiso no se concede automáticamente: el
-     * usuario debe habilitarlo en Ajustes. Sin él, `fullScreenIntent` se ignora
-     * y la cuenta atrás no aparece desde la pantalla de bloqueo.
-     */
-    private fun puedeFullScreenIntent(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            return getSystemService(NotificationManager::class.java)
-                .canUseFullScreenIntent()
-        }
-        return true
-    }
-
-    private fun pedirPermisoFullScreen() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                startActivity(
-                    Intent(
-                        "android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT",
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            } catch (e: Exception) {
-                // Fallback si el fabricante no expone esa pantalla.
-                startActivity(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                )
-            }
         }
     }
 }

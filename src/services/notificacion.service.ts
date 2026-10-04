@@ -126,6 +126,31 @@ export const marcarLeida = async (id_notificacion: number, id_usuario: number) =
     }
 };
 
+/**
+ * Quita una notificación de la bandeja del vecino.
+ *
+ * Solo borra el aviso, no la alerta: esta sigue en el muro de la comunidad.
+ * Filtra por receptor por el mismo motivo que [marcarLeida].
+ */
+export const eliminarNotificacion = async (id_notificacion: number, id_usuario: number) => {
+    const { count } = await prisma.notificacion.deleteMany({
+        where: { id_notificacion, id_usuario_receptor: id_usuario },
+    });
+
+    if (count === 0) {
+        throw new ErrorNotificacion('Esa notificación no existe o no es tuya.', 404);
+    }
+};
+
+/** Vacía la bandeja del vecino. Las alertas siguen en el muro. */
+export const vaciarBandeja = async (id_usuario: number) => {
+    const { count } = await prisma.notificacion.deleteMany({
+        where: { id_usuario_receptor: id_usuario },
+    });
+
+    return { eliminadas: count };
+};
+
 /** Marca todas las del vecino como leídas. */
 export const marcarTodasLeidas = async (id_usuario: number) => {
     const { count } = await prisma.notificacion.updateMany({

@@ -23,6 +23,16 @@ class ServicioNotificaciones {
     await _api.parchear('/api/notificaciones/leidas');
   }
 
+  /// `DELETE /api/notificaciones/:id` — quita un aviso; la alerta sigue en el muro.
+  Future<void> eliminar(int idNotificacion) async {
+    await _api.eliminar('/api/notificaciones/$idNotificacion');
+  }
+
+  /// `DELETE /api/notificaciones` — vacía la bandeja; las alertas siguen en el muro.
+  Future<void> vaciarBandeja() async {
+    await _api.eliminar('/api/notificaciones');
+  }
+
   /// `POST /api/dispositivos` — asocia el token FCM del teléfono a la cuenta.
   ///
   /// Se llama al iniciar sesión y cada vez que Firebase renueva el token.
