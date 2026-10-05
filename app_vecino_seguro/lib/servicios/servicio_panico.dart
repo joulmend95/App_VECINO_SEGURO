@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/entorno.dart';
 import 'cliente_api.dart';
@@ -25,6 +26,51 @@ class ServicioPanico {
   ServicioPanico([this._api]);
 
   final ClienteApi? _api;
+
+  /// Lo que el vecino eligió en los ajustes: la fuente de verdad del
+  /// interruptor. Kotlin también la lee (`flutter.panico_activado`) para
+  /// relanzar el servicio al encender el teléfono.
+  static const clavePreferencia = 'panico_activado';
+
+  /// Mantiene el gesto como el vecino lo dejó.
+  ///
+  /// Algunos fabricantes (Infinix/XOS, Xiaomi, Oppo…) fuerzan el cierre de la
+  /// app al quitarla de «Recientes», y eso detiene el servicio aunque el
+  /// vecino lo tuviera activado. Se llama al abrir la app y al volver a ella:
+  /// si estaba elegido y el servicio no corre, se relanza —con la app a la
+  /// vista Android lo permite— y se renueva la credencial.
+  ///
+  /// Devuelve si el servicio queda en marcha.
+  Future<bool> mantenerActivo() async {
+    if (!disponible) return false;
+    final elegido = await elegidoPorElVecino();
+    if (!elegido) return false;
+    if (await estaActivo()) {
+      await sincronizarCredencial();
+      return true;
+    }
+    debugPrint('[PANICO] El sistema detuvo el servicio: se reactiva.');
+    return activar();
+  }
+
+  /// Guarda la elección del vecino.
+  Future<void> recordarEleccion(bool activado) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(clavePreferencia, activado);
+    } catch (e) {
+      debugPrint('[PANICO] No se pudo guardar la preferencia: $e');
+    }
+  }
+
+  Future<bool> elegidoPorElVecino() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(clavePreferencia) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static const _metodos = MethodChannel('vecinoseguro/panico');
   static const _eventos = EventChannel('vecinoseguro/panico/eventos');

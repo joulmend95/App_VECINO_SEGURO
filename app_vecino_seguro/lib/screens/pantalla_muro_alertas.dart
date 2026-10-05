@@ -67,6 +67,30 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
   /// Notificaciones sin leer, para el indicador de la barra superior.
   int _noLeidas = 0;
 
+  /// Solicitudes de ingreso esperando aprobación. Solo se consulta si el vecino
+  /// es el administrador.
+  int _solicitudesPendientes = 0;
+
+  /// El administrador se entera aquí de que alguien espera su aprobación, sin
+  /// tener que entrar a «Solicitudes» a mirar. Falla en silencio, como la
+  /// campana.
+  Future<void> _contarSolicitudes() async {
+    if (_apiInyectada != null) return; // Pantalla montada suelta en pruebas.
+    if (!(context.sesion.perfil?.esAdmin ?? false)) return;
+    try {
+      final pendientes = await context.servicios.comunidades.listarPendientes();
+      if (!mounted) return;
+      setState(() => _solicitudesPendientes = pendientes.length);
+    } on ExcepcionApi {
+      // Silencio deliberado.
+    }
+  }
+
+  Future<void> _abrirSolicitudes() async {
+    await context.push(Rutas.solicitudes);
+    if (mounted) _contarSolicitudes();
+  }
+
   /// Cancela las peticiones en vuelo al abandonar el muro.
   final _cancelacion = CancelToken();
 
@@ -106,6 +130,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _cargar();
       _contarNoLeidas();
+      _contarSolicitudes();
       _escucharCola();
       _escucharAvisos();
     });
@@ -157,6 +182,7 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
   Future<void> _actualizarSolo() async {
     if (!mounted || _refrescando || _estado is VistaCargando) return;
     _contarNoLeidas();
+    _contarSolicitudes();
     await _cargar(esRefresco: true, conservarSiFalla: true);
   }
 
@@ -420,7 +446,8 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
             onPerfil: () => context.push(Rutas.perfil),
             onMiembros: () => context.push(Rutas.miembros),
             onSalirComunidad: _salirDeComunidad,
-            onSolicitudes: () => context.push(Rutas.solicitudes),
+            onSolicitudes: _abrirSolicitudes,
+            solicitudesPendientes: _solicitudesPendientes,
             onPanico: () => context.push(Rutas.ajustesPanico),
             onCerrarSesion: _cerrarSesion,
           ),
@@ -453,6 +480,21 @@ class _PantallaMuroAlertasState extends State<PantallaMuroAlertas>
               ),
               child: const TarjetaAvisos(),
             ),
+
+            // --- Solicitudes esperando al administrador ---
+            if (_solicitudesPendientes > 0)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  t.espacio.margenPantalla,
+                  t.espacio.entreGrupos,
+                  t.espacio.margenPantalla,
+                  0,
+                ),
+                child: _AvisoSolicitudes(
+                  cantidad: _solicitudesPendientes,
+                  onRevisar: _abrirSolicitudes,
+                ),
+              ),
 
             // --- Buscador (componente del catálogo) ---
             Padding(
@@ -597,6 +639,55 @@ class _ListaAlertas extends StatelessWidget {
 /// de seguridad vecinal, un muro vacío se interpreta como "no ha pasado nada".
 /// Sin la antigüedad, un vecino podría estar viendo una foto de hace media hora
 /// y creerla actual. La cifra es lo que le permite decidir si fiarse.
+/// Aviso al administrador de que hay vecinos esperando su aprobación.
+class _AvisoSolicitudes extends StatelessWidget {
+  const _AvisoSolicitudes({required this.cantidad, required this.onRevisar});
+
+  final int cantidad;
+  final VoidCallback onRevisar;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final texto = cantidad == 1
+        ? '1 vecino espera tu aprobación'
+        : '$cantidad vecinos esperan tu aprobación';
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        padding: EdgeInsets.all(t.espacio.entreGrupos),
+        decoration: BoxDecoration(
+          color: t.color.primarioSuave,
+          borderRadius: t.radio.brControl,
+        ),
+        child: Row(
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.group_add_outlined,
+                color: t.color.onPrimarioSuave,
+                size: context.escalarAdorno(t.tamano.iconoGrande),
+              ),
+            ),
+            SizedBox(width: t.espacio.entreElementos),
+            Expanded(
+              child: Text(
+                texto,
+                style: context.textos.titleSmall?.copyWith(
+                  color: t.color.onPrimarioSuave,
+                ),
+              ),
+            ),
+            TextButton(onPressed: onRevisar, child: const Text('Revisar')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AvisoSinConexion extends StatelessWidget {
   const _AvisoSinConexion({required this.antiguedad, this.pendientes = 0});
 
@@ -697,6 +788,7 @@ class _MenuVecino extends StatelessWidget {
     required this.onSolicitudes,
     required this.onPanico,
     required this.onCerrarSesion,
+    this.solicitudesPendientes = 0,
   });
 
   final VoidCallback onPerfil;
@@ -704,6 +796,7 @@ class _MenuVecino extends StatelessWidget {
   final VoidCallback onSalirComunidad;
   final VoidCallback onSolicitudes;
   final VoidCallback onPanico;
+  final int solicitudesPendientes;
   final VoidCallback onCerrarSesion;
 
   @override
@@ -765,11 +858,18 @@ class _MenuVecino extends StatelessWidget {
           ),
         ),
         if (esAdmin)
-          const PopupMenuItem<String>(
+          PopupMenuItem<String>(
             value: 'solicitudes',
             child: ListTile(
-              leading: Icon(Icons.group_add_outlined),
-              title: Text('Solicitudes para unirse'),
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('Solicitudes para unirse'),
+              trailing: solicitudesPendientes > 0
+                  ? Badge(
+                      label: Text('$solicitudesPendientes'),
+                      backgroundColor: t.color.peligroRelleno,
+                      textColor: t.color.onPeligroRelleno,
+                    )
+                  : null,
               contentPadding: EdgeInsets.zero,
             ),
           ),

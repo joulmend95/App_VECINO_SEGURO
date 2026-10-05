@@ -729,10 +729,17 @@ class ServicioPanico : Service() {
             val restart = Intent(applicationContext, ServicioPanico::class.java).apply {
                 action = ACCION_INICIAR
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(restart)
-            } else {
-                startService(restart)
+            // Desde Android 12 iniciar un servicio en primer plano desde segundo
+            // plano puede lanzar una excepción. Si falla, la app lo relanza sola
+            // la próxima vez que se abra (ver `mantenerActivo` en Flutter).
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(restart)
+                } else {
+                    startService(restart)
+                }
+            } catch (e: Exception) {
+                Log.w("Panico", "No se pudo relanzar el servicio al cerrar la tarea", e)
             }
         }
     }

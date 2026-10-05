@@ -8,6 +8,7 @@ import '../servicios/dependencias.dart';
 import '../theme/tokens_semanticos.dart';
 import '../widgets/boton_accion.dart';
 import '../widgets/vista_estado.dart';
+import '../widgets/boton_copiar_codigo.dart';
 
 /// **P12 — Solicitudes pendientes** (solo administrador)
 ///
@@ -178,6 +179,7 @@ class _RecordatorioCodigo extends StatelessWidget {
               ),
             ),
           ),
+          BotonCopiarCodigo(codigo: codigo, color: t.color.onPrimarioSuave),
         ],
       ),
     );

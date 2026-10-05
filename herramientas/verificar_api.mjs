@@ -105,11 +105,30 @@ const comunidad = await llamar(baseA, 'POST', '/api/comunidades', {
 });
 comprobar(comunidad.estado === 201, 'crear comunidad → 201', comunidad);
 
+// El admin registra un token push inválido: si el servidor intenta avisarle de
+// la solicitud, Firebase lo rechaza y el servidor lo purga. Volver a
+// registrarlo crea entonces una fila nueva (otro id). Solo es concluyente si
+// el servidor tiene Firebase configurado.
+const tokenAvisoAdmin = `token-invalido-solicitud-${sufijo}-${'x'.repeat(10)}`;
+const dispAdmin = await llamar(baseA, 'POST', '/api/dispositivos', {
+    token: tokenAdmin, cuerpo: { token_push: tokenAvisoAdmin, plataforma: 'android' },
+});
+
 const solicitud = await llamar(baseA, 'POST', '/api/comunidades/solicitudes', {
     token: tokenVecina,
     cuerpo: { codigo },
 });
 comprobar(solicitud.estado === 201, 'solicitar ingreso → 201', solicitud);
+
+const avisoSolicitud = await esperarHasta(async () => {
+    const r = await llamar(baseB, 'POST', '/api/dispositivos', {
+        token: tokenAdmin, cuerpo: { token_push: tokenAvisoAdmin, plataforma: 'android' },
+    });
+    if (r.json?.id_dispositivo !== dispAdmin.json?.id_dispositivo) return r;
+    return null;
+}, { intentos: 10, pausa: 800 });
+comprobar(avisoSolicitud, 'el servidor envía un push al admin al llegar la solicitud (requiere Firebase)');
+await llamar(baseA, 'DELETE', '/api/dispositivos', { token: tokenAdmin, cuerpo: { token_push: tokenAvisoAdmin } });
 
 // La instancia B consulta ANTES de la aprobación: si guardara la pertenencia en
 // memoria, después seguiría negando el acceso aunque A ya la hubiera aprobado.

@@ -56,6 +56,15 @@ export const tokensDeComunidad = async (
     return dispositivos.map((d) => d.token_push);
 };
 
+/** Tokens push de un solo vecino, por ejemplo el administrador. */
+export const tokensDeUsuario = async (id_usuario: number): Promise<string[]> => {
+    const dispositivos = await prisma.dispositivo.findMany({
+        where: { id_usuario },
+        select: { token_push: true },
+    });
+    return dispositivos.map((d) => d.token_push);
+};
+
 /** Elimina tokens que FCM reportó como inválidos o caducados. */
 export const purgarTokens = async (tokens: string[]) => {
     if (tokens.length === 0) return;

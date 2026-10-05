@@ -88,6 +88,42 @@ export const enviarAviso = async (aviso: AvisoPush): Promise<void> => {
 };
 
 /**
+ * Avisa al administrador de que un vecino pide unirse a su comunidad.
+ *
+ * Sin esto, el administrador solo se enteraba entrando a «Solicitudes» por su
+ * cuenta, y el vecino nuevo quedaba esperando sin saber hasta cuándo. Nunca
+ * lanza, por el mismo motivo que [enviarAviso].
+ */
+export const avisarSolicitud = async (aviso: {
+    tokens: string[];
+    nombreVecino: string;
+    comunidad: string;
+}): Promise<void> => {
+    const mensajeria = obtenerMensajeria();
+    if (aviso.tokens.length === 0 || !mensajeria) return;
+
+    try {
+        const respuesta = await mensajeria.sendEachForMulticast({
+            tokens: aviso.tokens,
+            notification: {
+                title: 'Nueva solicitud para unirse',
+                body: `${aviso.nombreVecino} quiere unirse a ${aviso.comunidad}.`,
+            },
+            // La app lo usa para abrir «Solicitudes» al tocar el aviso.
+            data: { tipo: 'solicitud' },
+            android: {
+                priority: 'normal',
+                notification: { channelId: 'solicitudes', defaultSound: true },
+            },
+        });
+        console.log(`📲 [PUSH] Aviso de solicitud: ${respuesta.successCount}/${aviso.tokens.length}`);
+        await limpiarTokensInvalidos(aviso.tokens, respuesta.responses);
+    } catch (error) {
+        console.error('❌ [PUSH] Fallo al avisar de la solicitud:', error);
+    }
+};
+
+/**
  * Elimina los tokens que Firebase reporta como inválidos.
  *
  * Un token deja de servir cuando el vecino desinstala la app o borra sus datos.

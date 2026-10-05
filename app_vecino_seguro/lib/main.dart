@@ -126,7 +126,11 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     // El push sigue el ciclo de vida de la sesión: se registra el dispositivo
     // al autenticarse y se da de baja al cerrar sesión. Sin la baja, el
     // teléfono seguiría recibiendo alertas de una comunidad ajena.
-    _push = ServicioPush(_servicios.notificaciones, _servicios.avisosEntrantes);
+    _push = ServicioPush(
+      _servicios.notificaciones,
+      _servicios.avisosEntrantes,
+      alAbrirAviso: _abrirDesdeAviso,
+    );
     _sesion.addListener(_sincronizarPush);
 
     // El gesto de pánico solo se escucha con sesión iniciada: sin saber a qué
@@ -169,8 +173,8 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
       // Al recuperar la sesión se reintenta lo que quedó sin enviar por falta
       // de red: una petición de auxilio no debe perderse.
       _drenarCola();
-      // Renueva la credencial con la que el gesto emite con la app cerrada.
-      _servicios.panico.sincronizarCredencial();
+      // Relanza el gesto si el sistema lo detuvo y renueva su credencial.
+      _servicios.panico.mantenerActivo();
 
       // Asocia el informe de fallos al vecino usando su ID interno, nunca
       // su correo ni teléfono. Esto permite correlacionar el crash con la
@@ -193,6 +197,18 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     }
   }
 
+  /// Lleva a la pantalla del aviso tocado: una solicitud de ingreso abre
+  /// «Solicitudes»; una alerta, su detalle. Las guardias del enrutador siguen
+  /// mandando: sin sesión, primero se pide ingresar.
+  void _abrirDesdeAviso(Map<String, dynamic> datos) {
+    if (datos['tipo'] == 'solicitud') {
+      _enrutador.push(Rutas.solicitudes);
+      return;
+    }
+    final idAlerta = int.tryParse('${datos['id_alerta'] ?? ''}');
+    if (idAlerta != null) _enrutador.push(Rutas.aDetalleAlerta(idAlerta));
+  }
+
   void _drenarCola() {
     // Sin sesión no hay token que adjuntar: intentarlo solo produciría 401 que
     // gastarían intentos de operaciones perfectamente válidas.
@@ -213,7 +229,7 @@ class _VecinoSeguroAppState extends State<VecinoSeguroApp>
     // emergencia cuando ya no puede.
     if (_pushActivo) {
       _push.revalidar();
-      _servicios.panico.sincronizarCredencial();
+      _servicios.panico.mantenerActivo();
     }
   }
 

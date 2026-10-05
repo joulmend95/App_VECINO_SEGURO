@@ -7,6 +7,7 @@ import '../widgets/boton_accion.dart';
 import '../widgets/campo_texto.dart';
 import '../widgets/dialogo_confirmacion.dart';
 import '../widgets/validador_campo.dart';
+import '../widgets/boton_copiar_codigo.dart';
 
 /// **Mi perfil**
 ///
@@ -417,6 +418,7 @@ class _TarjetaComunidad extends StatelessWidget {
               ],
             ),
           ),
+          BotonCopiarCodigo(codigo: codigo, color: t.color.onPrimarioSuave),
         ],
       ),
     );

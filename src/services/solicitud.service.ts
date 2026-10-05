@@ -1,6 +1,9 @@
 import prisma from '../config/prisma';
 import { EstadoSolicitud } from '@prisma/client';
+import { waitUntil } from '@vercel/functions';
 import { invalidarPertenencia } from '../middlewares/auth.middleware';
+import { tokensDeUsuario } from './notificacion.service';
+import { avisarSolicitud } from './push.service';
 
 export class ErrorSolicitud extends Error {
     constructor(mensaje: string, public readonly estado = 400) {
@@ -19,7 +22,7 @@ export class ErrorSolicitud extends Error {
 export const solicitarIngreso = async (id_usuario: number, codigo: string) => {
     const usuario = await prisma.usuario.findUnique({
         where: { id_usuario },
-        select: { id_comunidad: true },
+        select: { id_comunidad: true, nombre: true },
     });
 
     if (usuario?.id_comunidad) {
@@ -28,7 +31,7 @@ export const solicitarIngreso = async (id_usuario: number, codigo: string) => {
 
     const comunidad = await prisma.comunidad.findUnique({
         where: { codigo_unico: codigo.trim().toUpperCase() },
-        select: { id_comunidad: true, nombre_comunidad: true },
+        select: { id_comunidad: true, nombre_comunidad: true, id_admin: true },
     });
 
     if (!comunidad) {
@@ -63,6 +66,21 @@ export const solicitarIngreso = async (id_usuario: number, codigo: string) => {
         : await prisma.solicitudMembresia.create({
             data: { id_usuario, id_comunidad: comunidad.id_comunidad },
         });
+
+    // Aviso al administrador después de responder: el vecino no tiene por qué
+    // esperar a Firebase. `waitUntil` mantiene viva la función en serverless.
+    if (comunidad.id_admin) {
+        const id_admin = comunidad.id_admin;
+        waitUntil(
+            tokensDeUsuario(id_admin).then((tokens) =>
+                avisarSolicitud({
+                    tokens,
+                    nombreVecino: usuario?.nombre ?? 'Un vecino',
+                    comunidad: comunidad.nombre_comunidad,
+                })
+            ).catch((error) => console.error('[SOLICITUD] No se pudo avisar al administrador:', error))
+        );
+    }
 
     return {
         id_solicitud: solicitud.id_solicitud,

@@ -22,10 +22,14 @@ import 'servicio_notificaciones.dart';
 /// Services, sin red— no debe impedir usar la aplicación: las alertas se siguen
 /// viendo en el muro y en la bandeja. El push es una comodidad, no la vía única.
 class ServicioPush {
-  ServicioPush(this._notificaciones, this._avisos);
+  ServicioPush(this._notificaciones, this._avisos, {this.alAbrirAviso});
 
   final ServicioNotificaciones _notificaciones;
   final AvisosEntrantes _avisos;
+
+  /// Se llama con los datos del aviso cuando el vecino lo toca para abrir la
+  /// app, para llevarlo a la pantalla que corresponde.
+  final void Function(Map<String, dynamic> datos)? alAbrirAviso;
 
   final _locales = FlutterLocalNotificationsPlugin();
 
@@ -53,6 +57,15 @@ class ServicioPush {
     enableVibration: true,
   );
 
+  /// Canal de solicitudes de ingreso, para el administrador. Separado para
+  /// que pueda silenciarlo sin dejar de recibir las alertas.
+  static const _canalSolicitudes = AndroidNotificationChannel(
+    'solicitudes',
+    'Solicitudes de ingreso',
+    description: 'Avisos cuando un vecino pide unirse a tu comunidad.',
+    importance: Importance.high,
+  );
+
   /// Prepara los canales, pide permiso y registra el token.
   ///
   /// Se llama tras iniciar sesión: antes no habría a qué cuenta asociar el
@@ -75,6 +88,13 @@ class ServicioPush {
       // delante — ver `TarjetaAvisos` en la pantalla del muro.
 
       FirebaseMessaging.onMessage.listen(_mostrarEnPrimerPlano);
+
+      // Tocar un aviso con la app en segundo plano, o con la app cerrada.
+      FirebaseMessaging.onMessageOpenedApp.listen(
+        (mensaje) => alAbrirAviso?.call(mensaje.data),
+      );
+      final inicial = await FirebaseMessaging.instance.getInitialMessage();
+      if (inicial != null) alAbrirAviso?.call(inicial.data);
 
       // Firebase renueva el token periódicamente. Sin escuchar este evento, el
       // teléfono dejaría de recibir avisos en silencio, sin ningún síntoma.
@@ -123,6 +143,7 @@ class ServicioPush {
 
     await plugin?.createNotificationChannel(_canalAlertas);
     await plugin?.createNotificationChannel(_canalPanico);
+    await plugin?.createNotificationChannel(_canalSolicitudes);
   }
 
   /// Vuelve a registrar el token en el servidor.
@@ -179,7 +200,11 @@ class ServicioPush {
     if (aviso == null) return;
 
     final esPanico = mensaje.data['es_panico'] == 'true';
-    final canal = esPanico ? _canalPanico : _canalAlertas;
+    final canal = mensaje.data['tipo'] == 'solicitud'
+        ? _canalSolicitudes
+        : esPanico
+        ? _canalPanico
+        : _canalAlertas;
 
     await _locales.show(
       id: mensaje.hashCode,

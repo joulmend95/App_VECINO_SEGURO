@@ -1,7 +1,6 @@
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../servicios/dependencias.dart';
 import '../servicios/servicio_panico.dart';
@@ -20,10 +19,6 @@ import 'pantalla_cuenta_atras.dart';
 class PantallaAjustesPanico extends StatefulWidget {
   const PantallaAjustesPanico({super.key});
 
-  /// Clave compartida con Kotlin: el receptor de arranque la lee para saber si
-  /// debe relanzar el servicio tras reiniciar el teléfono.
-  static const clavePreferencia = 'panico_activado';
-
   @override
   State<PantallaAjustesPanico> createState() => _PantallaAjustesPanicoState();
 }
@@ -33,6 +28,9 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
   bool _bateriaOptimizada = false;
   bool _cargando = true;
 
+  /// El vecino lo dejó activado, el sistema lo detuvo y no se pudo relanzar.
+  bool _detenidoPorElSistema = false;
+
   ServicioPanico get _panico => context.servicios.panico;
 
   @override
@@ -41,12 +39,17 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _cargarEstado());
   }
 
+  /// El interruptor refleja lo que el vecino eligió, no solo si el servicio
+  /// corre en este instante: si un cierre forzado del fabricante lo detuvo, se
+  /// relanza aquí mismo antes de pintar el estado.
   Future<void> _cargarEstado() async {
-    final activo = await _panico.estaActivo();
+    final elegido = await _panico.elegidoPorElVecino();
+    final activo = await _panico.mantenerActivo() || await _panico.estaActivo();
     final bateria = await _panico.bateriaOptimizada();
     if (!mounted) return;
     setState(() {
       _activo = activo;
+      _detenidoPorElSistema = elegido && !activo;
       _bateriaOptimizada = bateria;
       _cargando = false;
     });
@@ -57,12 +60,9 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
 
     final exito = valor ? await _panico.activar() : await _panico.desactivar();
 
-    // Se guarda para que el receptor de arranque sepa si relanzar el servicio.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(
-      PantallaAjustesPanico.clavePreferencia,
-      valor && exito,
-    );
+    // La elección se guarda para relanzar el servicio al reiniciar el teléfono
+    // y cada vez que se abra la app, si el sistema lo detuvo.
+    await _panico.recordarEleccion(valor && exito);
 
     if (!mounted) return;
     await _cargarEstado();
@@ -114,9 +114,27 @@ class _PantallaAjustesPanicoState extends State<PantallaAjustesPanico> {
               ),
             ),
 
+            if (_detenidoPorElSistema) ...[
+              SizedBox(height: t.espacio.entreGrupos),
+              _AvisoDetenido(onReactivar: () => _alternar(true)),
+            ],
+
             if (_activo && _bateriaOptimizada) ...[
               SizedBox(height: t.espacio.entreGrupos),
               _AvisoBateria(onCorregir: _panico.pedirExencionBateria),
+            ],
+
+            if (_activo) ...[
+              SizedBox(height: t.espacio.entreElementos),
+              Text(
+                'En algunos teléfonos (Infinix, Xiaomi, Oppo…) quitar la app '
+                'de «Recientes» detiene el gesto. Se reactiva solo al volver a '
+                'abrir la app. Para que no se detenga, permite el «Inicio '
+                'automático» de Vecino Seguro en los ajustes del teléfono.',
+                style: context.textos.bodySmall?.copyWith(
+                  color: t.color.onSuperficieSutil,
+                ),
+              ),
             ],
 
             SizedBox(height: t.espacio.separacionSeccion),
@@ -208,6 +226,51 @@ class _ExplicacionGesto extends StatelessWidget {
             style: context.textos.bodyMedium?.copyWith(
               color: t.color.onPeligroSuave,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// El gesto estaba activado pero el sistema lo detuvo y no se pudo relanzar.
+class _AvisoDetenido extends StatelessWidget {
+  const _AvisoDetenido({required this.onReactivar});
+
+  final VoidCallback onReactivar;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return Container(
+      padding: EdgeInsets.all(t.espacio.interiorCard),
+      decoration: BoxDecoration(
+        color: t.color.peligroSuave,
+        borderRadius: t.radio.brControl,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'El teléfono detuvo el botón de pánico',
+            style: context.textos.titleSmall?.copyWith(
+              color: t.color.onPeligroSuave,
+            ),
+          ),
+          SizedBox(height: t.espacio.entreElementos),
+          Text(
+            'Lo tenías activado, pero el sistema cerró la app y no se pudo '
+            'volver a encender solo. Revisa los permisos y vuelve a activarlo.',
+            style: context.textos.bodySmall?.copyWith(
+              color: t.color.onPeligroSuave,
+            ),
+          ),
+          SizedBox(height: t.espacio.entreGrupos),
+          BotonAccion(
+            texto: 'Reactivar',
+            variante: VarianteBoton.secundario,
+            onPressed: onReactivar,
           ),
         ],
       ),
